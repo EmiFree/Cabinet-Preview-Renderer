@@ -1,0 +1,9 @@
+# scratch and generated files
+work/
+__pycache__/
+*.pyc
+jobs/*/output/
+
+# client drawings (copyrighted by the designer; keep out of the repo)
+jobs/*
+! jobs/.gitkeep

@@ -1,0 +1,135 @@
+{
+  "_comment": "Material/texture registry. Every material a job can reference is listed here by id. kind: procedural (drawn by a generator in engine/textures.js), image (a file in this textures/ folder), color, metal, glass, sky. repeatInches = real-world size of one texture tile in inches [u, v]. Add image textures with: run tools textures-add.",
+  "materials": {
+    "rift-white-oak-light-bleached": {
+      "label": "Rift cut white oak, light bleached",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood",
+      "params": { "base": "#dccdb2", "dark": [150, 126, 92], "light": [245, 238, 224], "lines": 420, "seed": 7 },
+      "repeatInches": [14, 28],
+      "roughness": 0.62
+    },
+    "walnut-natural": {
+      "label": "Walnut, natural (clear finish)",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood",
+      "params": { "base": "#5e4030", "dark": [38, 24, 16], "light": [140, 104, 74], "lines": 380, "seed": 21 },
+      "repeatInches": [14, 28],
+      "roughness": 0.55
+    },
+    "walnut-groove": {
+      "label": "Shadow line for bead route on walnut (use as finishes.groove with walnut-natural)",
+      "category": "detail",
+      "kind": "color",
+      "color": "#2a1b12",
+      "roughness": 0.8
+    },
+    "bead-groove": {
+      "label": "Shadow line for bead route / grooves",
+      "category": "detail",
+      "kind": "color",
+      "color": "#9c8a6c",
+      "roughness": 0.8
+    },
+    "davinci-honed": {
+      "label": "Da Vinci 1st Choice, honed",
+      "category": "stone",
+      "kind": "procedural",
+      "generator": "stone",
+      "params": { "base": "#ece6da", "veins": 14, "seed": 11 },
+      "repeatInches": [60, 60],
+      "roughness": 0.55
+    },
+    "mcintyre-glacier-4x4": {
+      "label": "McIntyre high fired porcelain, Glacier, 4x4 straight stack, Cape Gray grout",
+      "category": "tile",
+      "kind": "procedural",
+      "generator": "tile-grid",
+      "params": { "base": "#e8ebe9", "grout": "#8e8f8a", "groutPx": 8, "px": [256, 256] },
+      "repeatInches": [4, 4],
+      "roughness": 0.28
+    },
+    "mcintyre-glacier-bar-liner": {
+      "label": "McIntyre bar liner, Glacier, 13/16 x 8",
+      "category": "tile",
+      "kind": "procedural",
+      "generator": "tile-grid",
+      "params": { "base": "#e3e7e5", "grout": "#9fa09b", "groutPx": 4, "px": [512, 64] },
+      "repeatInches": [8, 1],
+      "roughness": 0.3
+    },
+    "lafabbrica-kauri-tasman-8x48": {
+      "label": "La Fabbrica Kauri Tasman porcelain, 8x48 offset",
+      "category": "tile",
+      "kind": "procedural",
+      "generator": "plank-offset",
+      "params": { "grout": "#6f5d4c", "colors": ["#a38a6f", "#94795e", "#b09679"], "seed": 3 },
+      "repeatInches": [48, 16],
+      "roughness": 0.6
+    },
+    "drywall-paint": {
+      "label": "Painted drywall (neutral, not specified)",
+      "category": "wall",
+      "kind": "color",
+      "color": "#c9c5bc",
+      "roughness": 0.92
+    },
+    "pony-wall-paint": {
+      "label": "Painted pony wall (neutral, not specified)",
+      "category": "wall",
+      "kind": "color",
+      "color": "#c4c0b7",
+      "roughness": 0.92
+    },
+    "floor-neutral": {
+      "label": "Floor (neutral, not specified)",
+      "category": "floor",
+      "kind": "color",
+      "color": "#9f998d",
+      "roughness": 0.85
+    },
+    "toe-kick-shadow": {
+      "label": "Recessed toe-kick (dark)",
+      "category": "detail",
+      "kind": "color",
+      "color": "#2e2d2a",
+      "roughness": 0.6
+    },
+    "satin-nickel": {
+      "label": "Satin nickel (placeholder hardware)",
+      "category": "metal",
+      "kind": "metal",
+      "color": "#b9b6ae",
+      "roughness": 0.32
+    },
+    "stainless": {
+      "label": "Brushed stainless",
+      "category": "metal",
+      "kind": "metal",
+      "color": "#c9cac8",
+      "roughness": 0.28
+    },
+    "clear-glass": {
+      "label": "Clear glass",
+      "category": "glass",
+      "kind": "glass",
+      "color": "#d8ebe6",
+      "opacity": 0.28
+    },
+    "window-sky": {
+      "label": "Daylight seen through windows",
+      "category": "detail",
+      "kind": "sky",
+      "color": "#eef3f6"
+    },
+    "outlet-plate": {
+      "label": "Outlet cover plate",
+      "category": "detail",
+      "kind": "color",
+      "color": "#f2f1ec",
+      "roughness": 0.4
+    }
+  }
+}
