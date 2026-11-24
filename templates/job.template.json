@@ -1,0 +1,61 @@
+{
+  "schema": "cpr-job/1",
+  "info": {
+    "title": "New job",
+    "subtitle": "Replace with sheet / room name",
+    "specs": [
+      ["Cabinets", "Rift cut white oak, light bleached"],
+      ["Tops", "Da Vinci 1st Choice, honed"]
+    ],
+    "notShown": ["Decorative hardware: style TBD (placeholders shown)"]
+  },
+  "finishes": {
+    "cabinet": "rift-white-oak-light-bleached",
+    "groove": "auto",
+    "toeKick": "toe-kick-shadow",
+    "hardware": "satin-nickel"
+  },
+  "defaults": {
+    "boxTop": 34.5,
+    "base": { "toeHeight": 2.5, "toeRecess": 3, "bandHeight": 2, "bandProjection": 0.25 }
+  },
+  "runs": [
+    {
+      "id": "back-wall",
+      "label": "Example run against a north wall, fronts facing south",
+      "origin": [0, 0],
+      "facing": "S",
+      "depth": 24,
+      "items": [
+        { "type": "end-panel" },
+        { "type": "cabinet", "id": "b1", "label": "3-drawer base", "width": 18,
+          "rows": [
+            { "height": 6, "fronts": [{ "style": "slab", "hardware": { "type": "knob", "x": "center", "fromTop": 3 } }] },
+            { "height": 9, "fronts": [{ "style": "shaker", "hardware": { "type": "bar", "x": "center", "fromTop": 2.5, "length": 6 } }] },
+            { "height": "fill", "fronts": [{ "style": "shaker", "hardware": { "type": "bar", "x": "center", "fromTop": 2.5, "length": 6 } }] }
+          ] },
+        { "type": "cabinet", "id": "b2", "label": "Double door base", "width": 30,
+          "rows": [
+            { "height": "fill", "fronts": [
+              { "style": "shaker", "hardware": { "type": "knob", "x": "right", "fromTop": 1.1 } },
+              { "style": "shaker", "hardware": { "type": "knob", "x": "left", "fromTop": 1.1 } }
+            ] }
+          ] },
+        { "type": "cabinet", "id": "b3", "label": "Single door base", "width": 18,
+          "rows": [ { "height": "fill", "fronts": [{ "style": "shaker", "hardware": { "type": "knob", "x": "left", "fromTop": 1.1 } }] } ] },
+        { "type": "end-panel" }
+      ]
+    }
+  ],
+  "counters": [
+    { "id": "top", "material": "davinci-honed", "x0": -1, "x1": 68, "z0": 0, "z1": 25.75, "top": 36, "thickness": 1.5 }
+  ],
+  "objects": [
+    { "type": "wall", "id": "north-wall", "material": "drywall-paint", "min": [-24, 0, -6], "max": [96, 108, 0], "roomSide": "S" },
+    { "type": "box", "id": "backsplash", "material": "mcintyre-glacier-4x4", "min": [-1, 36, 0], "max": [68, 54, 0.35] }
+  ],
+  "views": [
+    { "id": "main", "label": "Front", "position": [33.5, 70, 170], "target": [33.5, 32, 10], "fov": 40 },
+    { "id": "left", "label": "From left", "position": [-80, 80, 120], "target": [30, 30, 10], "fov": 40 }
+  ]
+}

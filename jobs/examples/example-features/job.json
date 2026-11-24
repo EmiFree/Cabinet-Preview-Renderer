@@ -1,0 +1,169 @@
+{
+  "schema": "cpr-job/1",
+  "info": {
+    "title": "Feature Showcase Kitchen",
+    "subtitle": "Example job using every engine feature (not a real project)",
+    "specs": [
+      ["Perimeter & tall", "Custom rift, natural oak (#d8c3a0); flush base, 1/4\" reveal"],
+      ["Uppers", "Same finish, light rail, under-cabinet LEDs, soffit flush with doors"],
+      ["Island", "Plain sawn walnut, coffee stain; vertical slats; applied 4\" base; push latch"],
+      ["Tops", "Soapstone, honed (perimeter); Fantastico Onyx, polished (island, waterfall end)"],
+      ["Hardware", "Custom metal, satin brass: edge pulls, tabs, bars, finger grooves"],
+      ["Walls", "Plain sawn walnut slat paneling; ridge-line window and steel door, black steel frames"]
+    ],
+    "notShown": ["Appliance brands and exact appliance faces (generic shown)", "Lighting fixtures other than LED strips"],
+    "notes": "Test job for the features requested in Feature_requests.md. Plan: x = east, z = south. North wall face z = 0, west wall face x = 0, east wall face x = 204."
+  },
+  "materials": {
+    "oak-natural": { "base": "custom-rift", "color": "#d8c3a0", "gloss": 0.3, "label": "Rift white oak, natural" },
+    "brass-satin": { "base": "custom-metal", "color": "#b59a62", "gloss": 0.55, "label": "Satin brass" }
+  },
+  "finishes": { "cabinet": "oak-natural", "groove": "auto", "toeKick": "toe-kick-shadow", "hardware": "brass-satin" },
+  "runs": [
+    {
+      "id": "north-base",
+      "label": "North wall base run, fronts face south",
+      "origin": [0, 0], "facing": "S", "depth": 24,
+      "base": { "type": "flush", "height": 4, "reveal": 0.25 },
+      "items": [
+        { "type": "cabinet", "id": "knife-stack", "label": "Knife drawer over drawer stack + utensil pullout", "width": 30,
+          "rows": [
+            { "height": 5.5, "fronts": [ { "style": "slab", "hardware": { "type": "edge-pull", "x": "center", "length": 10 } } ] },
+            { "height": "fill", "columns": [
+              { "width": 17.5, "rows": [
+                { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "tab", "x": "center" } } ] },
+                { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "tab", "x": "center" } } ] }
+              ] },
+              { "rows": [ { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "bar", "x": "center", "fromTop": 2, "length": 5 } } ] } ] }
+            ] }
+          ] },
+        { "type": "cabinet", "id": "range-base", "label": "Rangetop base, 2 pot drawers", "width": 36,
+          "rows": [
+            { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "bar", "x": "center", "length": 18 } } ] },
+            { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "bar", "x": "center", "length": 18 } } ] }
+          ] },
+        { "type": "cabinet", "id": "grooves", "label": "Finger-groove drawers", "width": 24,
+          "rows": [
+            { "height": 7, "fronts": [ { "style": "slab", "beadRoute": false, "hardware": { "type": "finger-groove", "length": 20 } } ] },
+            { "height": "fill", "fronts": [ { "style": "slab", "beadRoute": false, "hardware": { "type": "finger-groove", "length": 20 } } ] },
+            { "height": "fill", "fronts": [ { "style": "slab", "beadRoute": false, "hardware": { "type": "finger-groove", "length": 20 } } ] }
+          ] },
+        { "type": "cabinet", "id": "dishwasher", "label": "Dishwasher", "width": 24,
+          "rows": [ { "height": "fill", "fronts": [ { "style": "appliance", "kind": "dishwasher" } ] } ] },
+        { "type": "cabinet", "id": "sink-base", "label": "Sink base", "width": 30, "sinkBase": true,
+          "rows": [
+            { "height": 6, "fronts": [ { "style": "slab" } ] },
+            { "height": "fill", "fronts": [
+              { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "right" } },
+              { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "left" } }
+            ] }
+          ] }
+      ]
+    },
+    {
+      "id": "uppers-left",
+      "label": "Wall cabinet left of the hood",
+      "origin": [0, 0], "facing": "S", "mount": "wall", "bottom": 54, "boxTop": 84, "depth": 13,
+      "lightRail": { "height": 1.5 }, "underLight": { "color": "#fff1dc" },
+      "soffit": { "to": 104, "flushWith": "doors" },
+      "items": [
+        { "type": "cabinet", "id": "u1", "width": 30,
+          "rows": [ { "height": "fill", "fronts": [
+            { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "right", "fromTop": 28 } },
+            { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "left", "fromTop": 28 } }
+          ] } ] }
+      ]
+    },
+    {
+      "id": "uppers-right",
+      "label": "Wall cabinets right of the hood",
+      "origin": [66, 0], "facing": "S", "mount": "wall", "bottom": 54, "boxTop": 84, "depth": 13,
+      "lightRail": true, "underLight": true,
+      "soffit": { "to": 104, "flushWith": "doors" },
+      "items": [
+        { "type": "cabinet", "id": "u2", "width": 24, "rows": [ { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "left", "fromTop": 28 } } ] } ] },
+        { "type": "cabinet", "id": "u3", "width": 24, "rows": [ { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "right", "fromTop": 28 } } ] } ] },
+        { "type": "cabinet", "id": "u4", "width": 30, "rows": [ { "height": "fill", "fronts": [
+          { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "right", "fromTop": 28 } },
+          { "style": "shaker", "stile": 1, "hardware": { "type": "knob", "x": "left", "fromTop": 28 } }
+        ] } ] }
+      ]
+    },
+    {
+      "id": "tall",
+      "label": "Tall oven column and wine column",
+      "origin": [144, 0], "facing": "S", "depth": 24, "boxTop": 90,
+      "base": { "type": "flush", "height": 4, "reveal": 0.25 },
+      "soffit": { "to": 104, "flushWith": "doors" },
+      "items": [
+        { "type": "cabinet", "id": "oven-column", "label": "Tray door over wall oven, warming drawer, drawer", "width": 30,
+          "rows": [
+            { "height": "fill", "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "bar", "x": "center", "fromTop": 13, "length": 8 } } ] },
+            { "height": 29, "fronts": [ { "style": "appliance", "kind": "wall-oven" } ] },
+            { "height": 10, "fronts": [ { "style": "appliance", "kind": "warming-drawer" } ] },
+            { "height": 12, "fronts": [ { "style": "shaker", "stile": 1, "hardware": { "type": "bar", "x": "center", "length": 8 } } ] }
+          ] },
+        { "type": "cabinet", "id": "wine", "label": "Wine column", "width": 24,
+          "rows": [ { "height": "fill", "fronts": [ { "style": "appliance", "kind": "wine-column", "handleSide": "left" } ] } ] },
+        { "type": "end-panel" }
+      ]
+    },
+    {
+      "id": "island",
+      "label": "Island, fronts face north",
+      "origin": [114, 96], "facing": "N", "depth": 24,
+      "base": { "type": "applied", "height": 4 },
+      "finishes": { "cabinet": "walnut-plain-coffee", "hardware": "brass-satin" },
+      "items": [
+        { "type": "end-panel", "style": "slat", "slatWidth": 2, "gap": 0.375 },
+        { "type": "cabinet", "id": "i1", "width": 30, "rows": [ { "height": "fill", "fronts": [
+          { "style": "slat", "slatWidth": 2, "gap": 0.375, "hardware": { "type": "push-latch" } },
+          { "style": "slat", "slatWidth": 2, "gap": 0.375, "hardware": { "type": "push-latch" } }
+        ] } ] },
+        { "type": "cabinet", "id": "i2", "width": 30, "rows": [ { "height": "fill", "fronts": [
+          { "style": "slat", "slatWidth": 2, "gap": 0.375, "hardware": { "type": "push-latch" } },
+          { "style": "slat", "slatWidth": 2, "gap": 0.375, "hardware": { "type": "push-latch" } }
+        ] } ] },
+        { "type": "end-panel", "style": "slat", "slatWidth": 2, "gap": 0.375 }
+      ]
+    }
+  ],
+  "counters": [
+    { "id": "perimeter-top", "material": "soapstone-honed", "x0": 0, "x1": 144, "z0": 0, "z1": 25, "top": 36, "thickness": 1.5,
+      "cutouts": [ { "x0": 30.5, "x1": 65.5, "z0": -1, "z1": 26 }, { "x0": 117, "x1": 141, "z0": 3.5, "z1": 20 } ] },
+    { "id": "island-top", "material": "fantastico-onyx-polished", "top": 36, "thickness": 1.5, "edge": "eased",
+      "outline": [[50.75, 70], [134, 70], [140, 84], [134, 98], [50.75, 98]],
+      "waterfall": [4] }
+  ],
+  "objects": [
+    { "type": "wall", "id": "north-wall", "material": "drywall-paint", "min": [-6, 0, -6], "max": [210, 130, 0], "roomSide": "S" },
+    { "type": "wall", "id": "west-wall", "material": "drywall-paint", "min": [-6, 0, 0], "max": [0, 130, 140], "roomSide": "E",
+      "openings": [ { "shape": [[30, 58], [90, 58], [90, 96], [60, 106], [30, 96]],
+                      "frame": { "width": 1.75, "material": "black-steel" },
+                      "mullions": { "vertical": [60], "horizontal": [80], "width": 1.25 } } ] },
+    { "type": "wall", "id": "east-wall", "material": "drywall-paint", "min": [204, 0, 0], "max": [210, 130, 140], "roomSide": "W",
+      "openings": [ { "kind": "door", "a0": 30, "a1": 66, "y1": 84, "swing": "left",
+                      "frame": { "width": 2.5, "material": "black-steel" },
+                      "muntins": { "horizontal": [31, 57], "width": 1.25 } } ] },
+    { "type": "ceiling", "id": "ceiling", "min": [-6, -6], "max": [210, 140], "height": 101, "slope": { "axis": "z", "rise": 24, "run": 140, "from": 0 } },
+    { "type": "box", "id": "backsplash", "material": "parker-olive-2x7", "min": [0, 36, 0], "max": [144, 54, 0.35] },
+    { "type": "rangetop", "id": "rangetop", "x0": 30.5, "x1": 65.5, "z0": 1, "z1": 25, "top": 36, "facing": "S", "burners": 6 },
+    { "type": "hood", "id": "hood", "x0": 30, "x1": 66, "z0": 0.35, "z1": 22, "bottom": 66, "top": 80, "shape": "tapered", "wall": "N",
+      "band": { "height": 1.5, "material": "black-steel" }, "chimney": { "shape": "round", "diameter": 12, "to": 104 } },
+    { "type": "sink", "id": "sink", "x0": 117, "x1": 141, "z0": 3.5, "z1": 20, "rim": 34.5, "depth": 8 },
+    { "type": "faucet", "id": "faucet", "position": [129, 36, 1.75], "facing": "S" },
+    { "type": "paneling", "id": "west-paneling", "material": "walnut-plain-coffee", "min": [0, 0, 28], "max": [0.75, 56, 120], "facing": "E", "slatWidth": 2.5, "gap": 0.5, "depth": 0.375 },
+    { "type": "shelf", "id": "east-shelf", "material": "walnut-rift-coffee", "x0": 192, "x1": 204, "z0": 80, "z1": 120, "y": 60, "thickness": 1.5, "cornerRadius": 3 },
+    { "type": "led-strip", "id": "shelf-led", "from": [196, 58.4, 82], "to": [196, 58.4, 118], "facing": "down" },
+    { "type": "leg", "id": "island-leg-n", "position": [130.5, 74], "height": 34.5, "size": 3, "material": "black-steel" },
+    { "type": "leg", "id": "island-leg-s", "position": [130.5, 94], "height": 34.5, "size": 3, "material": "black-steel" }
+  ],
+  "lighting": { "sunFrom": [0.3, 1.6, 1.2] },
+  "views": [
+    { "id": "overview", "label": "Overview", "position": [-70, 170, 290], "target": [100, 30, 60], "fov": 42 },
+    { "id": "north", "label": "North wall", "position": [80, 64, 132], "target": [80, 52, 0], "fov": 60 },
+    { "id": "east", "label": "East wall", "position": [40, 62, 62], "target": [204, 50, 62], "fov": 62 },
+    { "id": "south", "label": "South (island fronts)", "position": [96, 60, 33], "target": [84, 24, 100], "fov": 72 },
+    { "id": "west", "label": "West wall", "position": [175, 62, 62], "target": [0, 62, 62], "fov": 62 }
+  ]
+}

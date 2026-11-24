@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cabinet Preview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: full-bleed 3D viewport, view tabs top-left, drawing-style title block bottom-left */
+:root{
+  --bg:#e7e5e0; --panel:#fbfaf7; --fg:#26241f; --muted:#6d685d; --line:#d3cfc5; --accent:#8a6f45; --scene:#dedbd4; --err:#a33b2b;
+  --f-display:"Space Grotesk",system-ui,sans-serif; --f-body:"Inter",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#1c1b19; --panel:#262420; --fg:#ece8df; --muted:#a49e91; --line:#3b3832; --accent:#c9a874; --scene:#2b2a27; --err:#e08a7a; color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1c1b19; --panel:#262420; --fg:#ece8df; --muted:#a49e91; --line:#3b3832; --accent:#c9a874; --scene:#2b2a27; --err:#e08a7a; color-scheme:dark}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body);overflow:hidden}
+#view{position:fixed;inset:0}
+#view canvas{display:block;width:100%;height:100%;touch-action:none}
+.tabs{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
+.tabs button{pointer-events:auto;font:500 12px/1 var(--f-body);letter-spacing:.02em;padding:8px 11px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.block{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(330px,calc(100% - 32px));background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-size:12px;box-sizing:border-box}
+.block h1{font:600 17px/1.1 var(--f-display);margin:0 0 2px;letter-spacing:.01em}
+.block .sub{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.block dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:8px 0 0}
+.block dt{color:var(--muted);white-space:nowrap}
+.block dd{margin:0;min-width:0}
+.block summary{cursor:pointer;color:var(--accent);font-weight:500;margin-top:8px;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.block ul{margin:6px 0 0;padding-left:16px;color:var(--muted)}
+.hint{position:fixed;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));font-size:11px;color:var(--muted)}
+#err{position:fixed;top:60px;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));color:var(--err);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace}
+body.capture .tabs,body.capture .block,body.capture .hint{display:none}
+@media (max-width:600px){.hint{display:none}}
+</style>
+</head>
+<body>
+<div id="view"></div>
+<nav class="tabs" id="tabs" aria-label="Camera views"></nav>
+<section class="block" id="block" hidden>
+  <h1 id="title"></h1>
+  <div class="sub" id="subtitle"></div>
+  <details id="specsWrap"><summary>Finish specs</summary><dl id="specs"></dl></details>
+  <details id="notShownWrap"><summary>Not shown</summary><ul id="notShown"></ul></details>
+</section>
+<div class="hint">Drag to orbit · scroll to zoom</div>
+<div id="err" hidden></div>
+
+<!--CPR:LIBS-->
+<!-- Served mode: use the copies in vendor/ when present (offline), otherwise the pinned CDN files. -->
+<script src="../vendor/three.min.js"></script>
+<script>
+  document.write(window.THREE
+    ? '<script src="../vendor/OrbitControls.js"><\/script><script src="../vendor/RoomEnvironment.js"><\/script>'
+    : '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"><\/script>' +
+      '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"><\/script>' +
+      '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js"><\/script>');
+</script>
+<!--/CPR:LIBS-->
+<!--CPR:ENGINE-->
+<script src="textures.js"></script>
+<script src="engine.js"></script>
+<!--/CPR:ENGINE-->
+<!--CPR:BOOT-->
+<script>
+/*
+  URL parameters (served mode, via tools "serve"):
+    job=<folder under jobs/>   e.g. moore-bar or examples/example-features; required unless the page is a standalone build
+    view=<view id>             start on this view
+    capture=1                  hide all UI (for screenshots); renders at the window size
+    save=all|<id,id>           with capture=1: render those views and POST PNGs to /api/save (server must be running)
+    w=<px>&h=<px>              size used by save=..., default 2400x1800
+  When done, the page sets window.CPR_STATUS = {ready:true, warnings:[...], runs:[...], saved:[...]} and the
+  document title to "CPR READY" (or "CPR ERROR: ...").
+*/
+(async function main(){
+  const Q = new URLSearchParams(location.search);
+  const errBox = document.getElementById('err');
+  const fail = (msg) => {
+    errBox.hidden = false; errBox.textContent = msg; document.title = 'CPR ERROR: ' + msg.split('\n')[0]; window.CPR_STATUS = { ready: false, error: msg };
+    if (Q.get('save') && !window.CPR_BOOT) fetch('/api/log', { method: 'POST', body: JSON.stringify({ kind: 'error', error: msg }) }).catch(() => {});
+  };
+  try {
+    let job, registry, images = {};
+    if (window.CPR_BOOT) { ({ job, registry } = window.CPR_BOOT); images = window.CPR_BOOT.images || {}; }
+    else {
+      const name = Q.get('job');
+      if (!name) throw new Error('Missing ?job=<job folder name> in the URL.');
+      const get = async (u) => { const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error(`Could not load ${u} (HTTP ${r.status})`); return r.json(); };
+      registry = await get('../textures/registry.json');
+      // name is the folder under jobs/, e.g. "moore-bar" or "examples/example-features"
+      job = await get(`../jobs/${name.split('/').map(encodeURIComponent).join('/')}/job.json`);
+    }
+    const capture = Q.get('capture') === '1';
+    if (capture) document.body.classList.add('capture');
+
+    const host = document.getElementById('view');
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(capture ? 1 : Math.min(devicePixelRatio, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = job.lighting?.exposure ?? 0.72;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    host.appendChild(renderer.domElement);
+
+    const lib = CPR.createMaterialLibrary(registry, (id, def) => images[id] || ('../textures/' + def.file), job.materials);
+    const built = CPR.buildScene(job, lib);
+    const scene = built.scene;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+    const syncBg = () => { scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--scene').trim() || '#dedbd4'); };
+    if (capture) scene.background = new THREE.Color(job.captureBackground || '#dedbd4'); else {
+      syncBg();
+      matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncBg);
+      new MutationObserver(syncBg).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    }
+
+    // info block
+    const info = job.info || {};
+    document.title = info.title || 'Cabinet Preview';
+    if (!capture && info.title) {
+      document.getElementById('block').hidden = false;
+      document.getElementById('title').textContent = info.title;
+      document.getElementById('subtitle').textContent = info.subtitle || '';
+      const dl = document.getElementById('specs');
+      (info.specs || []).forEach(([k, v]) => { const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; dl.append(dt, dd); });
+      document.getElementById('specsWrap').hidden = !(info.specs || []).length;
+      const ul = document.getElementById('notShown');
+      (info.notShown || []).forEach((t) => { const li = document.createElement('li'); li.textContent = t; ul.append(li); });
+      document.getElementById('notShownWrap').hidden = !(info.notShown || []).length;
+    }
+
+    // camera + views
+    const camera = new THREE.PerspectiveCamera(38, 1, 1, 3000);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = !capture; controls.maxPolarAngle = Math.PI * 0.495;
+    // job views first; automatic overview + compass views when the job has none or sets "autoViews": true
+    const own = job.views || [];
+    const views = own.length && !job.autoViews ? own : own.concat(built.autoViews.filter((a) => !own.some((v) => v.id === a.id)));
+    let baseFov = views[0].fov || 38, anim = null;
+    const fovFor = (f) => (host.clientWidth / host.clientHeight < 1 ? Math.min(75, f * 1.5) : f);
+    function setView(v, instant) {
+      document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.id === v.id));
+      const p1 = new THREE.Vector3(...v.position), t1 = new THREE.Vector3(...v.target); baseFov = v.fov || 38;
+      if (instant || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        camera.position.copy(p1); controls.target.copy(t1); camera.fov = fovFor(baseFov); camera.updateProjectionMatrix(); controls.update(); return;
+      }
+      anim = { p0: camera.position.clone(), t0: controls.target.clone(), p1, t1, f0: camera.fov, f1: fovFor(baseFov), s: performance.now() };
+    }
+    const tabs = document.getElementById('tabs');
+    views.forEach((v) => { const b = document.createElement('button'); b.type = 'button'; b.id = 'v-' + v.id; b.dataset.id = v.id; b.textContent = v.label || v.id; b.addEventListener('click', () => setView(v)); tabs.append(b); });
+
+    function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = fovFor(baseFov); camera.updateProjectionMatrix(); }
+    addEventListener('resize', resize); resize();
+    const startView = views.find((v) => v.id === Q.get('view')) || views[0];
+    setView(startView, true);
+
+    if (built.warnings.length) console.warn('CPR warnings:\n' + built.warnings.join('\n'));
+    const status = { ready: false, warnings: built.warnings, runs: built.runs, views: views.map((v) => v.id), saved: [] };
+    window.CPR_STATUS = status;
+
+    // save mode: render each view at w x h and POST PNG to the local server
+    const save = Q.get('save');
+    if (capture && save) {
+      const W = +Q.get('w') || 2400, H = +Q.get('h') || 1800;
+      const want = save === 'all' ? views : views.filter((v) => save.split(',').includes(v.id));
+      renderer.setSize(W, H, false); camera.aspect = W / H;
+      for (const v of want) {
+        camera.position.set(...v.position); controls.target.set(...v.target); camera.fov = v.fov || 38; camera.updateProjectionMatrix(); controls.update();
+        renderer.render(scene, camera);
+        const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
+        const name = (job.captureNames && job.captureNames[v.id]) || `${v.id}.png`;
+        const path = `jobs/${Q.get('job')}/output/${name}`;
+        const res = await fetch(`/api/save?path=${encodeURIComponent(path)}`, { method: 'POST', body: blob });
+        if (!res.ok) throw new Error(`Saving ${name} failed: HTTP ${res.status} ${await res.text()}`);
+        status.saved.push((await res.json()).path);
+      }
+      status.ready = true; document.title = 'CPR READY';
+      await fetch('/api/log', { method: 'POST', body: JSON.stringify({ kind: 'done', warnings: status.warnings, saved: status.saved }) });
+      return;
+    }
+
+    renderer.setAnimationLoop(() => {
+      if (anim) {
+        let k = Math.min(1, (performance.now() - anim.s) / 900); k = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+        camera.position.lerpVectors(anim.p0, anim.p1, k); controls.target.lerpVectors(anim.t0, anim.t1, k);
+        camera.fov = anim.f0 + (anim.f1 - anim.f0) * k; camera.updateProjectionMatrix(); if (k >= 1) anim = null;
+      }
+      controls.update(); renderer.render(scene, camera);
+      if (!status.ready) { status.ready = true; document.title = capture ? 'CPR READY' : (info.title || 'Cabinet Preview'); }
+    });
+  } catch (e) { fail(e && e.stack ? `${e.message}\n\n${e.stack}` : String(e)); }
+})();
+</script>
+<!--/CPR:BOOT-->
+</body>
+</html>

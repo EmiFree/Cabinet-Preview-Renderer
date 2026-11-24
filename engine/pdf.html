@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF sheet viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;color:#222;font:12px/1.4 system-ui,sans-serif}
+  canvas{display:block}
+  #info{position:fixed;right:8px;bottom:8px;background:rgba(255,255,255,.9);border:1px solid #ccc;border-radius:4px;padding:4px 8px}
+  body.capture #info{display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info"></div>
+<script src="../vendor/pdf.min.js"></script>
+<script>if (!window.pdfjsLib) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>'); window.CPR_PDF_LOCAL = !!window.pdfjsLib;</script>
+<script>
+/*
+  Zoomable PDF sheet viewer for reading drawings. Served by tools "serve".
+  URL parameters:
+    file=<path relative to the project root>   e.g. jobs/moore-bar/source/elevations.pdf  (required)
+    page=<n>                                    1-based page number, default 1
+    crop=fx,fy,fw,fh                            region as fractions of the page (0..1), default 0,0,1,1
+    grid=1                                      overlay a labelled 10% grid to help pick crop fractions
+    capture=1&save=<project-relative .png path>&w=<px>&h=<px>   render the crop and save it as PNG (used by tools "pdf-snap")
+  Result: window.CPR_PDF = {pages, pageWidthPt, pageHeightPt, crop, pxPerPt}; title "CPR READY" when drawn.
+  Scale tip: at 1/2" = 1'-0", 1 inch of real size = 1/24 inch on paper = 3 pt. At 1/4" = 1'-0" it is 1.5 pt.
+  Real inches = (distance in pt) / (pt per real inch). Distance in pt = distance in canvas px / pxPerPt.
+*/
+pdfjsLib.GlobalWorkerOptions.workerSrc = window.CPR_PDF_LOCAL ? '../vendor/pdf.worker.min.js' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+(async () => {
+  const Q = new URLSearchParams(location.search);
+  const capture = Q.get('capture') === '1';
+  if (capture) document.body.classList.add('capture');
+  const log = (o) => fetch('/api/log', { method: 'POST', body: JSON.stringify(o) }).catch(() => {});
+  try {
+    const file = Q.get('file'); if (!file) throw new Error('Missing ?file=<project-relative pdf path>');
+    const doc = await pdfjsLib.getDocument('/' + file.replace(/^\/+/, '')).promise;
+    const pageNo = Math.min(Math.max(1, +Q.get('page') || 1), doc.numPages);
+    const page = await doc.getPage(pageNo);
+    const [fx, fy, fw, fh] = (Q.get('crop') || '0,0,1,1').split(',').map(Number);
+    const v1 = page.getViewport({ scale: 1 });
+    const W = capture ? (+Q.get('w') || 2000) : innerWidth, H = capture ? (+Q.get('h') || 1500) : innerHeight;
+    const k = Math.min(W / (fw * v1.width), H / (fh * v1.height));
+    const v = page.getViewport({ scale: k, offsetX: -fx * v1.width * k, offsetY: -fy * v1.height * k });
+    const c = document.getElementById('c');
+    c.width = Math.round(fw * v1.width * k); c.height = Math.round(fh * v1.height * k);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: g, viewport: v }).promise;
+    if (Q.get('grid') === '1') {
+      g.strokeStyle = 'rgba(220,40,40,.45)'; g.fillStyle = 'rgba(220,40,40,.9)'; g.font = '12px sans-serif'; g.lineWidth = 1;
+      for (let i = 0; i <= 10; i++) {
+        const gx = (fx + fw * i / 10), gy = (fy + fh * i / 10);
+        const px = (i / 10) * c.width, py = (i / 10) * c.height;
+        g.beginPath(); g.moveTo(px, 0); g.lineTo(px, c.height); g.stroke(); g.fillText(gx.toFixed(3), px + 2, 12);
+        g.beginPath(); g.moveTo(0, py); g.lineTo(c.width, py); g.stroke(); g.fillText(gy.toFixed(3), 2, py - 2);
+      }
+    }
+    window.CPR_PDF = { pages: doc.numPages, page: pageNo, pageWidthPt: v1.width, pageHeightPt: v1.height, crop: [fx, fy, fw, fh], pxPerPt: k, canvas: [c.width, c.height] };
+    document.getElementById('info').textContent = `page ${pageNo}/${doc.numPages} · sheet ${(v1.width / 72).toFixed(1)}" x ${(v1.height / 72).toFixed(1)}" · ${k.toFixed(3)} px per pt`;
+    const save = Q.get('save');
+    if (capture && save) {
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const res = await fetch('/api/save?path=' + encodeURIComponent(save), { method: 'POST', body: blob });
+      if (!res.ok) throw new Error('save failed: HTTP ' + res.status + ' ' + await res.text());
+      await log({ kind: 'done', saved: [(await res.json()).path], pdf: window.CPR_PDF });
+    }
+    document.title = 'CPR READY';
+  } catch (e) {
+    document.body.textContent = 'Error: ' + e.message; document.title = 'CPR ERROR: ' + e.message;
+    if (capture) log({ kind: 'error', error: e.message });
+  }
+})();
+</script>
+</body>
+</html>
