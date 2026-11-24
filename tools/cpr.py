@@ -1323,6 +1323,111 @@ def cmd_job_material(a):
     return 0
 
 
+# ----------------------------------------------------------------------------- static site (GitHub Pages)
+SITE_MARKER = ".cpr-site"
+
+
+def site_index_html(cards, generated):
+    esc = lambda t: str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    items = []
+    for c in cards:
+        thumb = (f'<img src="{esc(c["thumb"])}" alt="{esc(c["title"])} overview" loading="lazy" width="1200" height="900">'
+                 if c["thumb"] else '<div class="nothumb">3D</div>')
+        specs = "".join(f"<li><span>{esc(k)}</span> {esc(v)}</li>" for k, v in c["specs"][:4])
+        items.append(f'''<a class="card" href="{esc(c["href"])}">
+  {thumb}
+  <div class="body"><h2>{esc(c["title"])}</h2><p>{esc(c["subtitle"])}</p><ul>{specs}</ul><span class="open">Open 3D viewer</span></div>
+</a>''')
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabinet Preview Renderer examples</title>
+<style>
+:root {{ --bg:#f3f1ec; --panel:#fffdf9; --fg:#26241f; --muted:#6d685d; --line:#dcd7cc; --accent:#8a6f45; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#1c1b19; --panel:#262420; --fg:#ece8df; --muted:#a49e91; --line:#3b3832; --accent:#c9a874; color-scheme: dark; }} }}
+* {{ box-sizing: border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }}
+main {{ max-width:1100px; margin:0 auto; padding:40px max(16px, env(safe-area-inset-left)) 56px; }}
+h1 {{ font-size:28px; margin:0 0 6px; letter-spacing:.01em; }}
+.lead {{ color:var(--muted); margin:0 0 28px; max-width:65ch; }}
+.grid {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:20px; }}
+.card {{ display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; color:inherit; text-decoration:none; }}
+.card:hover, .card:focus-visible {{ border-color:var(--accent); outline:none; }}
+.card img, .nothumb {{ width:100%; height:auto; aspect-ratio:4/3; object-fit:cover; display:block; background:#dedbd4; }}
+.nothumb {{ display:grid; place-items:center; color:var(--muted); font-size:32px; }}
+.body {{ padding:14px 16px 16px; display:flex; flex-direction:column; gap:6px; flex:1; }}
+.body h2 {{ font-size:18px; margin:0; }}
+.body p {{ margin:0; color:var(--muted); font-size:13px; }}
+.body ul {{ list-style:none; margin:4px 0 0; padding:0; font-size:13px; }}
+.body li span {{ color:var(--muted); }}
+.open {{ margin-top:auto; padding-top:8px; color:var(--accent); font-weight:600; font-size:13px; }}
+footer {{ margin-top:36px; color:var(--muted); font-size:12px; }}
+</style>
+</head>
+<body>
+<main>
+<h1>Cabinet Preview Renderer examples</h1>
+<p class="lead">Example cabinet layouts rendered from job files. Each one opens as an interactive 3D viewer: drag to orbit, scroll to zoom, and use the view buttons for each wall.</p>
+<div class="grid">
+{chr(10).join(items)}
+</div>
+<footer>Built {esc(generated)} from jobs/examples/ by tools/cpr.py site.</footer>
+</main>
+</body>
+</html>
+'''
+
+
+def cmd_site(a):
+    """Build every job in jobs/examples/ into a static site folder (index page + one self-contained viewer per example)."""
+    out = Path(a.out).expanduser().resolve()
+    if out == ROOT or out in ROOT.parents or out.parent == ROOT and out.name in ("jobs", "engine", "tools", "textures", "vendor", "runtime"):
+        raise CprError(f"Refusing to write the site into {out}. Use a separate folder such as _site.")
+    if out.exists():
+        if any(out.iterdir()) and not (out / SITE_MARKER).exists():
+            raise CprError(f"{out} already has files that were not made by this command. Pick an empty folder.")
+        shutil.rmtree(out)
+    (out / "examples").mkdir(parents=True)
+    (out / SITE_MARKER).write_text("made by tools/cpr.py site; safe to delete\n", encoding="utf-8")
+    (out / ".nojekyll").write_text("", encoding="utf-8")   # serve files as-is on GitHub Pages
+    examples = [j for j in list_jobs() if j["example"]]
+    if not examples:
+        raise CprError("No example jobs found in jobs/examples/.")
+    cards = []
+    for j in examples:
+        name = j["name"]
+        d = require_job(name)
+        job = load_json(d / "job.json")
+        html_path, _ = build_standalone(name, out / "examples" / f"{name}.html", "inline")
+        print(f"Built examples/{name}.html")
+        ids = view_ids(job)
+        vid = "overview" if "overview" in ids else (ids[0] if ids else None)
+        fname = ((job.get("captureNames") or {}).get(vid) or f"{vid}.png") if vid else None
+        thumb = None
+        if a.thumbnails and vid:
+            try:
+                cmd_capture(argparse.Namespace(job=name, views=vid, size="1200x900", out=str(out / "examples"),
+                                               browser=a.browser, timeout=a.timeout))
+                src = out / "examples" / fname
+                if src.exists():
+                    src.replace(out / "examples" / f"{name}.png")
+                    thumb = f"examples/{name}.png"
+            except CprError as e:
+                print(f"  thumbnail for {name} skipped: {e}")
+        elif vid and (d / "output" / fname).is_file():
+            shutil.copy2(d / "output" / fname, out / "examples" / f"{name}.png")
+            thumb = f"examples/{name}.png"
+        info = job.get("info") or {}
+        cards.append({"title": info.get("title") or name, "subtitle": info.get("subtitle") or "", "specs": info.get("specs") or [],
+                      "href": f"examples/{name}.html", "thumb": thumb})
+    generated = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+    (out / "index.html").write_text(site_index_html(cards, generated), encoding="utf-8")
+    print(f"Site ready: {out} ({len(cards)} example(s)). Preview it with: serve, then open /{rel(out)}/index.html if it is inside the project.")
+    return 0
+
+
 def cmd_package(a):
     out = Path(a.out).expanduser() if a.out else ROOT.parent / f"{ROOT.name}.zip"
     if inside_root(out):
@@ -1459,6 +1564,13 @@ def main(argv=None):
     s.add_argument("--remove", action="store_true", help="delete this custom material from the job")
     s.add_argument("--list", action="store_true", help="list the job's custom materials")
     s.set_defaults(fn=cmd_job_material)
+
+    s = sub.add_parser("site", help="build every jobs/examples/ job into a static website folder (for GitHub Pages)")
+    s.add_argument("--out", default="_site", help="output folder (default _site); it is replaced on each run")
+    s.add_argument("--thumbnails", action="store_true", help="render a fresh overview image per example (needs Chrome/Edge/Chromium)")
+    s.add_argument("--browser", help="path to Chrome/Edge/Chromium")
+    s.add_argument("--timeout", type=int, default=240)
+    s.set_defaults(fn=cmd_site)
 
     s = sub.add_parser("package", help="zip the project for handing to someone else")
     s.add_argument("--out", help="zip path (default: next to the project folder)")

@@ -1,0 +1,74 @@
+# Publishes the example jobs (jobs/examples/*) to GitHub Pages as interactive 3D viewers.
+#
+# One-time setup on GitHub: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+# After that, every push to main rebuilds and republishes the site. It can also be run by hand from the
+# Actions tab ("Publish examples" -> "Run workflow").
+#
+# What it runs is the same command you can run locally to preview the site:
+#   Windows:      .\run.cmd site --thumbnails
+#   macOS/Linux:  sh run.sh site --thumbnails
+# Only jobs inside jobs/examples/ are published. Never put client jobs or drawings there:
+# a GitHub Pages site is public.
+
+name: Publish examples
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; let a running deployment finish
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the tools and examples
+        run: |
+          python3 tools/cpr.py doctor || true
+          for d in jobs/examples/*/; do
+            name="$(basename "$d")"
+            [ -f "$d/job.json" ] || continue
+            python3 tools/cpr.py validate "$name"
+          done
+
+      # Builds _site/: index.html plus one self-contained viewer per example (three.js comes from vendor/).
+      # --thumbnails renders an overview image with the runner's headless Chrome; if that fails the
+      # site is still built, just without thumbnails.
+      - name: Build the site
+        run: python3 tools/cpr.py site --out _site --thumbnails
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

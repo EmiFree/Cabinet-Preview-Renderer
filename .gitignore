@@ -3,6 +3,8 @@ work/
 __pycache__/
 *.pyc
 jobs/*/output/
+# website built by "site" (GitHub Pages builds its own copy)
+_site/
 
 # client drawings (copyrighted by the designer; keep out of the repo)
 jobs/*
