@@ -14,7 +14,8 @@
 <body>
 <canvas id="c"></canvas>
 <div id="info"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="../vendor/pdf.min.js"></script>
+<script>if (!window.pdfjsLib) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"><\/script>'); window.CPR_PDF_LOCAL = !!window.pdfjsLib;</script>
 <script>
 /*
   Zoomable PDF sheet viewer for reading drawings. Served by tools "serve".
@@ -28,7 +29,7 @@
   Scale tip: at 1/2" = 1'-0", 1 inch of real size = 1/24 inch on paper = 3 pt. At 1/4" = 1'-0" it is 1.5 pt.
   Real inches = (distance in pt) / (pt per real inch). Distance in pt = distance in canvas px / pxPerPt.
 */
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = window.CPR_PDF_LOCAL ? '../vendor/pdf.worker.min.js' : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 (async () => {
   const Q = new URLSearchParams(location.search);
   const capture = Q.get('capture') === '1';

@@ -7,3 +7,5 @@ jobs/*/output/
 # client drawings (copyrighted by the designer; keep out of the repo)
 jobs/*
 ! jobs/.gitkeep
+# example jobs are kept in the repo
+!jobs/examples/

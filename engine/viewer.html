@@ -49,9 +49,17 @@ body.capture .tabs,body.capture .block,body.capture .hint{display:none}
 <div class="hint">Drag to orbit · scroll to zoom</div>
 <div id="err" hidden></div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js"></script>
+<!--CPR:LIBS-->
+<!-- Served mode: use the copies in vendor/ when present (offline), otherwise the pinned CDN files. -->
+<script src="../vendor/three.min.js"></script>
+<script>
+  document.write(window.THREE
+    ? '<script src="../vendor/OrbitControls.js"><\/script><script src="../vendor/RoomEnvironment.js"><\/script>'
+    : '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"><\/script>' +
+      '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"><\/script>' +
+      '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js"><\/script>');
+</script>
+<!--/CPR:LIBS-->
 <!--CPR:ENGINE-->
 <script src="textures.js"></script>
 <script src="engine.js"></script>
@@ -60,7 +68,7 @@ body.capture .tabs,body.capture .block,body.capture .hint{display:none}
 <script>
 /*
   URL parameters (served mode, via tools "serve"):
-    job=<job folder name>      required unless the page is a standalone build
+    job=<folder under jobs/>   e.g. moore-bar or examples/example-features; required unless the page is a standalone build
     view=<view id>             start on this view
     capture=1                  hide all UI (for screenshots); renders at the window size
     save=all|<id,id>           with capture=1: render those views and POST PNGs to /api/save (server must be running)
@@ -83,7 +91,8 @@ body.capture .tabs,body.capture .block,body.capture .hint{display:none}
       if (!name) throw new Error('Missing ?job=<job folder name> in the URL.');
       const get = async (u) => { const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error(`Could not load ${u} (HTTP ${r.status})`); return r.json(); };
       registry = await get('../textures/registry.json');
-      job = await get(`../jobs/${encodeURIComponent(name)}/job.json`);
+      // name is the folder under jobs/, e.g. "moore-bar" or "examples/example-features"
+      job = await get(`../jobs/${name.split('/').map(encodeURIComponent).join('/')}/job.json`);
     }
     const capture = Q.get('capture') === '1';
     if (capture) document.body.classList.add('capture');
@@ -98,7 +107,7 @@ body.capture .tabs,body.capture .block,body.capture .hint{display:none}
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     host.appendChild(renderer.domElement);
 
-    const lib = CPR.createMaterialLibrary(registry, (id, def) => images[id] || ('../textures/' + def.file));
+    const lib = CPR.createMaterialLibrary(registry, (id, def) => images[id] || ('../textures/' + def.file), job.materials);
     const built = CPR.buildScene(job, lib);
     const scene = built.scene;
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -129,7 +138,9 @@ body.capture .tabs,body.capture .block,body.capture .hint{display:none}
     const camera = new THREE.PerspectiveCamera(38, 1, 1, 3000);
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !capture; controls.maxPolarAngle = Math.PI * 0.495;
-    const views = (job.views && job.views.length) ? job.views : [{ id: 'default', label: 'View', position: [-200, 110, 40], target: [-30, 24, 40], fov: 38 }];
+    // job views first; automatic overview + compass views when the job has none or sets "autoViews": true
+    const own = job.views || [];
+    const views = own.length && !job.autoViews ? own : own.concat(built.autoViews.filter((a) => !own.some((v) => v.id === a.id)));
     let baseFov = views[0].fov || 38, anim = null;
     const fovFor = (f) => (host.clientWidth / host.clientHeight < 1 ? Math.min(75, f * 1.5) : f);
     function setView(v, instant) {

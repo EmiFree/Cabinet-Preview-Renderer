@@ -11,7 +11,7 @@
   },
   "finishes": {
     "cabinet": "rift-white-oak-light-bleached",
-    "groove": "bead-groove",
+    "groove": "auto",
     "toeKick": "toe-kick-shadow",
     "hardware": "satin-nickel"
   },

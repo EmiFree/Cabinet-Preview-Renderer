@@ -33,16 +33,20 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent.parent
 JOBS = ROOT / "jobs"
+EXAMPLE_JOBS = JOBS / "examples"   # example jobs (kept in the repo); looked up after jobs/<name>
 TEXTURES = ROOT / "textures"
 REGISTRY = TEXTURES / "registry.json"
 ENGINE = ROOT / "engine"
 WORK = ROOT / "work"
 SCHEMA = "cpr-job/1"
 FACINGS = {"N": (0, -1), "S": (0, 1), "E": (1, 0), "W": (-1, 0)}
-ITEM_TYPES = {"cabinet", "blank", "end-panel"}
-OBJECT_TYPES = {"box", "wall", "sink", "faucet", "outlet", "tube-shelving"}
+ITEM_TYPES = {"cabinet", "blank", "end-panel", "filler"}
+OBJECT_TYPES = {"box", "wall", "sink", "faucet", "outlet", "tube-shelving", "rangetop", "hood", "ceiling",
+                "led-strip", "shelf", "leg", "paneling"}
 MATERIAL_KINDS = {"procedural", "image", "color", "metal", "glass", "sky"}
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+# procedural texture generators defined in engine/textures.js (GENERATORS); keep in sync when adding one
+GENERATOR_NAMES = {"wood-rift", "wood-plain", "stone", "tile-grid", "plank-offset"}
 JOB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
@@ -63,9 +67,12 @@ def load_json(path):
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=2, ensure_ascii=False)
+    # keep coordinate lists like [48, 58, 64] on one line so job files stay readable
+    text = re.sub(r"\[\s*(-?[\d.eE+-]+(?:,\s*-?[\d.eE+-]+)*)\s*\]",
+                  lambda m: "[" + ", ".join(v.strip() for v in m.group(1).split(",")) + "]", text)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+        f.write(text + "\n")
 
 
 def rel(p):
@@ -76,17 +83,32 @@ def rel(p):
 
 
 def job_dir(name):
-    if not JOB_NAME_RE.match(name or ""):
-        raise CprError(f'Bad job name "{name}". Use lowercase letters, digits and hyphens, e.g. "smith-kitchen".')
+    """Folder for a NEW job (always jobs/<name>)."""
+    if not JOB_NAME_RE.match(name or "") or name == "examples":
+        raise CprError(f'Bad job name "{name}". Use lowercase letters, digits and hyphens, e.g. "smith-kitchen" ("examples" is reserved).')
     return JOBS / name
 
 
+def find_job(name):
+    """Existing job folder: jobs/<name>, then jobs/examples/<name>. None if missing."""
+    job_dir(name)
+    for d in (JOBS / name, EXAMPLE_JOBS / name):
+        if (d / "job.json").is_file():
+            return d
+    return None
+
+
 def require_job(name):
-    d = job_dir(name)
-    if not (d / "job.json").exists():
-        have = ", ".join(sorted(p.name for p in JOBS.iterdir() if (p / "job.json").exists())) if JOBS.exists() else ""
-        raise CprError(f'No job "{name}" (expected {rel(d / "job.json")}). Existing jobs: {have or "none"}.')
+    d = find_job(name)
+    if not d:
+        have = ", ".join(j["name"] for j in list_jobs())
+        raise CprError(f'No job "{name}" (looked in jobs/{name}/ and jobs/examples/{name}/). Existing jobs: {have or "none"}.')
     return d
+
+
+def job_ref(d):
+    """Path of a job folder relative to jobs/, e.g. "moore-bar" or "examples/example-features" (used in viewer URLs)."""
+    return Path(d).resolve().relative_to(JOBS.resolve()).as_posix()
 
 
 def inside_root(p):
@@ -126,11 +148,79 @@ def registry_problems(reg):
             f = d.get("file")
             if not f or not (TEXTURES / f).is_file():
                 out.append(f'material "{mid}": image file "{f}" not found in textures/')
-        if k == "procedural" and not d.get("generator"):
-            out.append(f'material "{mid}": procedural materials need a "generator"')
+        if k == "procedural":
+            g = d.get("generator")
+            if not g:
+                out.append(f'material "{mid}": procedural materials need a "generator"')
+            elif g == "wood":
+                out.append(f'material "{mid}": generator "wood" was renamed; use "wood-rift" (straight grain) or "wood-plain" (cathedral grain)')
+            elif g not in GENERATOR_NAMES:
+                out.append(f'material "{mid}": unknown generator "{g}" (known: {", ".join(sorted(GENERATOR_NAMES))})')
+        cu = d.get("custom")
+        if cu is not None:
+            if not isinstance(cu, dict):
+                out.append(f'material "{mid}": "custom" must be an object of default options')
+            else:
+                for k, v in cu.items():
+                    p = custom_option_problem(k, v)
+                    if p:
+                        out.append(f'material "{mid}": custom default {p}')
         rep = d.get("repeatInches")
         if rep is not None and not (isinstance(rep, list) and len(rep) == 2 and all(isinstance(v, (int, float)) and v > 0 for v in rep)):
             out.append(f'material "{mid}": repeatInches must be [width, height] in inches')
+    return out
+
+
+# ----------------------------------------------------------------------------- custom materials
+HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+CUSTOM_OPTIONS = {
+    "color": "sRGB hex like #8a5a3b",
+    "gloss": "number 0 (matte) to 1 (high gloss)",
+    "seed": "integer; changes the grain pattern (woods only)",
+    "grainContrast": "number 0 to 1; how dark the grain lines are (woods only, default 0.42)",
+    "label": "text shown in listings",
+}
+
+
+def custom_option_problem(k, v):
+    if k not in CUSTOM_OPTIONS:
+        return f'"{k}" is not a custom option (allowed: {", ".join(CUSTOM_OPTIONS)})'
+    if k == "color" and not (isinstance(v, str) and HEX_RE.match(v)):
+        return f'color must be a hex colour like "#8a5a3b", got {v!r}'
+    if k in ("gloss", "grainContrast") and not (num(v) and 0 <= v <= 1):
+        return f"{k} must be a number from 0 to 1, got {v!r}"
+    if k == "seed" and not (isinstance(v, int) and not isinstance(v, bool) and v > 0):
+        return f"seed must be a positive integer, got {v!r}"
+    if k == "label" and not isinstance(v, str):
+        return "label must be text"
+    return None
+
+
+def custom_problems(jid, inst, reg):
+    """Problems with one entry of a job's "materials" (a customised copy of a registry material)."""
+    where = f'materials.{jid}'
+    if not re.match(r"^[a-z0-9][a-z0-9-]*$", jid):
+        return [f"{where}: id must be lowercase letters, digits and hyphens"]
+    if jid in reg["materials"]:
+        return [f'{where}: id clashes with the registry material "{jid}"; choose another id']
+    if not isinstance(inst, dict):
+        return [f"{where}: must be an object like {{\"base\": \"custom-rift\", \"color\": \"#8a5a3b\"}}"]
+    base = inst.get("base")
+    bdef = reg["materials"].get(base)
+    if not bdef:
+        return [f'{where}: base "{base}" is not in the registry']
+    if not isinstance(bdef.get("custom"), dict):
+        custom_ids = sorted(k for k, d in reg["materials"].items() if isinstance(d.get("custom"), dict))
+        return [f'{where}: base "{base}" is not customisable; use one of {", ".join(custom_ids)}']
+    out = []
+    for k, v in inst.items():
+        if k == "base":
+            continue
+        p = custom_option_problem(k, v)
+        if p:
+            out.append(f"{where}: {p}")
+        elif k in ("seed", "grainContrast") and bdef.get("kind") != "procedural":
+            out.append(f"{where}: {k} only applies to wood bases")
     return out
 
 
@@ -139,31 +229,163 @@ def num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+FRONT_STYLES = {"shaker", "slab", "slat", "appliance", "none"}
+APPLIANCE_KINDS = {"wall-oven", "microwave-drawer", "warming-drawer", "wine-column", "dishwasher", "refrigerator", "panel"}
+HARDWARE_TYPES = {"knob", "bar", "appliance-pull", "edge-pull", "tab", "finger-groove", "push-latch", "none"}
+BASE_TYPES = {"recessed", "flush", "applied", "none"}
+AUTO_VIEW_IDS = ["overview", "north", "east", "south", "west"]
+
+
+def run_front_bottom(run, defaults):
+    """Height where fronts start (top of base, or underside of a wall cabinet)."""
+    if run.get("mount") == "wall":
+        return run.get("bottom", defaults.get("wallBottom", 54))
+    b = run.get("base", True)
+    if b is False:
+        return 0
+    b = b if isinstance(b, dict) else {}
+    t = b.get("type", "recessed")
+    if t == "flush":
+        return b.get("height", 4) + b.get("reveal", 0.25)
+    if t == "applied":
+        return b.get("height", 4) + b.get("reveal", 0.125)
+    if t == "none":
+        return b.get("height", 0)
+    db = {"toeHeight": 2.5, "bandHeight": 2, **defaults.get("base", {})}
+    return b.get("toeHeight", db["toeHeight"]) + b.get("bandHeight", db["bandHeight"])
+
+
+def view_ids(job):
+    own = [v.get("id") for v in job.get("views") or []]
+    if not own or job.get("autoViews"):
+        return own + [a for a in AUTO_VIEW_IDS if a not in own]
+    return own
+
+
+def point_in_poly(x, z, poly):
+    inside = False
+    for i in range(len(poly)):
+        (x1, z1), (x2, z2) = poly[i], poly[(i + 1) % len(poly)]
+        if (z1 > z) != (z2 > z) and x < (x2 - x1) * (z - z1) / (z2 - z1) + x1:
+            inside = not inside
+    return inside
+
+
+def on_poly_or_inside(x, z, poly):
+    if point_in_poly(x, z, poly):
+        return True
+    for i in range(len(poly)):
+        (x1, z1), (x2, z2) = poly[i], poly[(i + 1) % len(poly)]
+        if abs((x2 - x1) * (z - z1) - (z2 - z1) * (x - x1)) < 1e-6 and min(x1, x2) - 1e-6 <= x <= max(x1, x2) + 1e-6 and min(z1, z2) - 1e-6 <= z <= max(z1, z2) + 1e-6:
+            return True
+    return False
+
+
+def is_pt(p, n):
+    return isinstance(p, list) and len(p) == n and all(num(v) for v in p)
+
+
+def coplanar_warnings(job, eps=1e-6):
+    """Boxes/walls that overlap AND have a face in the same plane facing the same way flicker in the viewer
+    (z-fighting: the GPU cannot decide which surface is in front). Faces that merely touch back to back are fine."""
+    solids = []
+    for o in job.get("objects") or []:
+        if o.get("type") in ("box", "wall", "paneling") and is_pt(o.get("min"), 3) and is_pt(o.get("max"), 3):
+            solids.append((o.get("id") or o.get("type"), o["min"], o["max"]))
+    pairs, axes = [], "xyz"
+    for i in range(len(solids)):
+        for j in range(i + 1, len(solids)):
+            (na, amin, amax), (nb, bmin, bmax) = solids[i], solids[j]
+            planes = []
+            for ax in range(3):
+                o1, o2 = [k for k in range(3) if k != ax]
+                ov = lambda k: min(amax[k], bmax[k]) - max(amin[k], bmin[k])
+                if ov(o1) <= eps or ov(o2) <= eps:
+                    continue
+                for side, va, vb in (("min", amin[ax], bmin[ax]), ("max", amax[ax], bmax[ax])):
+                    if abs(va - vb) <= eps:
+                        planes.append(f"{axes[ax]}={va:g}")
+            if planes:
+                pairs.append(f'"{na}" + "{nb}" ({", ".join(planes)})')
+    if not pairs:
+        return []
+    shown = pairs[:8]
+    more = f" ... and {len(pairs) - 8} more pairs" if len(pairs) > 8 else ""
+    return ["possible flicker (z-fighting): these objects overlap with faces in the same plane: " + "; ".join(shown) + more +
+            '. Only faces you can see matter (faces hidden against a wall are harmless). Fix visible ones by moving one face about 0.05" '
+            "or making the objects meet edge to edge instead of overlapping."]
+
+
 def validate_job(job, reg):
     """Return (errors, warnings, report). report holds computed world geometry for checking against drawings."""
     errors, warnings = [], []
-    mats = reg["materials"]
+    mats = dict(reg["materials"])
+    for jid, inst in (job.get("materials") or {}).items():
+        errors.extend(custom_problems(jid, inst, reg))
+        mats[jid] = {"kind": "custom-instance"}
 
-    def need_mat(mid, where):
-        if mid is None:
+    def need_mat(mid, where, allow_auto=False):
+        if mid is None or (allow_auto and mid == "auto"):
             return
         if mid not in mats:
-            errors.append(f'{where}: unknown material "{mid}" (see "textures list")')
+            errors.append(f'{where}: unknown material "{mid}" (see "textures list" or define it in the job\'s "materials")')
 
     if job.get("schema") != SCHEMA:
         warnings.append(f'"schema" should be "{SCHEMA}"')
     defaults = job.get("defaults", {})
     box_top = defaults.get("boxTop", 34.5)
-    base = {"toeHeight": 2.5, "bandHeight": 2, **defaults.get("base", {})}
-    base_h = base["toeHeight"] + base["bandHeight"]
     reveal = defaults.get("reveal", 0.125)
     margin = defaults.get("frontMargin", 0.1)
     T = defaults.get("frontThickness", 0.75)
 
     for role, mid in (job.get("finishes") or {}).items():
-        need_mat(mid, f"finishes.{role}")
+        need_mat(mid, f"finishes.{role}", allow_auto=(role == "groove"))
 
-    report = {"runs": []}
+    def check_front(f, iw):
+        st = f.get("style", "shaker")
+        if st not in FRONT_STYLES:
+            errors.append(f"{iw}: front style must be one of {sorted(FRONT_STYLES)}")
+        if st == "appliance":
+            if f.get("kind", "panel") not in APPLIANCE_KINDS:
+                errors.append(f"{iw}: appliance kind must be one of {sorted(APPLIANCE_KINDS)}")
+            need_mat(f.get("material"), iw + " appliance")
+            need_mat(f.get("glass"), iw + " appliance glass")
+        for k in ("slatWidth", "gap", "depth", "stile"):
+            if k in f and not (num(f[k]) and f[k] > 0):
+                errors.append(f"{iw}: {k} must be a positive number")
+        for hw in ([f["hardware"]] if isinstance(f.get("hardware"), dict) else f.get("hardware") or []):
+            if hw.get("type", "knob") not in HARDWARE_TYPES:
+                errors.append(f"{iw}: hardware type must be one of {sorted(HARDWARE_TYPES)}")
+            need_mat(hw.get("material"), f"{iw} hardware")
+            need_mat(hw.get("finish"), f"{iw} hardware finish")
+
+    def check_rows(rows, span, iw):
+        rows = rows or [{"height": "fill"}]
+        fixed = sum(r.get("height") for r in rows if num(r.get("height")))
+        fills = sum(1 for r in rows if not num(r.get("height")))
+        used = fixed + reveal * (len(rows) - 1)
+        if fills == 0 and abs(used - span) > 0.25:
+            warnings.append(f"{iw}: rows + reveals = {used:.2f} but the space is {span:.2f}; use \"fill\" on one row")
+        if fills and used >= span:
+            errors.append(f"{iw}: fixed row heights ({used:.2f}) leave no room for the fill row (space {span:.2f})")
+        fill_h = (span - used) / fills if fills else 0
+        for ri_, r in enumerate(rows):
+            h = r["height"] if num(r.get("height")) else fill_h
+            if "columns" in r:
+                if "fronts" in r:
+                    errors.append(f"{iw} row {ri_}: use either fronts or columns, not both")
+                cols = r.get("columns") or []
+                if not cols:
+                    errors.append(f"{iw} row {ri_}: columns is empty")
+                for ci_, c in enumerate(cols):
+                    if "width" in c and not (num(c["width"]) and c["width"] > 0):
+                        errors.append(f"{iw} row {ri_} column {ci_}: width must be a positive number")
+                    check_rows(c.get("rows"), h, f"{iw} row {ri_} column {ci_}")
+            else:
+                for f in r.get("fronts") or []:
+                    check_front(f, f"{iw} row {ri_}")
+
+    report = {"runs": [], "counters": [], "objects": []}
     ids = set()
     for ri, run in enumerate(job.get("runs") or []):
         where = f'runs[{ri}] ("{run.get("id", "?")}")'
@@ -175,11 +397,32 @@ def validate_job(job, reg):
             errors.append(f"{where}: facing must be N, S, E or W (the direction the fronts point)")
             continue
         o = run.get("origin")
-        if not (isinstance(o, list) and len(o) == 2 and all(num(v) for v in o)):
+        if not is_pt(o, 2):
             errors.append(f"{where}: origin must be [x, z] (back-left corner, inches)")
             continue
-        depth = run.get("depth", 24)
-        rtop = run.get("boxTop", box_top)
+        for role, mid in (run.get("finishes") or {}).items():
+            need_mat(mid, f"{where} finishes.{role}", allow_auto=(role == "groove"))
+        mount = run.get("mount", "floor")
+        if mount not in ("floor", "wall"):
+            errors.append(f'{where}: mount must be "floor" or "wall"')
+        b = run.get("base")
+        if isinstance(b, dict) and b.get("type", "recessed") not in BASE_TYPES:
+            errors.append(f"{where}: base.type must be one of {sorted(BASE_TYPES)}")
+        if mount == "wall" and isinstance(b, dict):
+            warnings.append(f"{where}: wall runs have no base; base is ignored")
+        so = run.get("soffit")
+        if so is not None:
+            if not (isinstance(so, dict) and num(so.get("to"))):
+                errors.append(f'{where}: soffit needs "to" (height of the ceiling or soffit top)')
+            else:
+                need_mat(so.get("material"), f"{where} soffit")
+        depth = run.get("depth", 12 if mount == "wall" else 24)
+        bottom_front = run_front_bottom(run, defaults)
+        rtop = run.get("boxTop", (bottom_front + 30) if mount == "wall" else box_top)
+        if isinstance(so, dict) and num(so.get("to")) and so["to"] <= rtop:
+            errors.append(f"{where}: soffit.to ({so['to']}) must be above the cabinet top ({rtop})")
+        if rtop <= bottom_front:
+            errors.append(f"{where}: boxTop ({rtop}) must be above the bottom of the fronts ({bottom_front})")
         a = (n[1], -n[0])
         P = lambda s, t: [round(o[0] + a[0] * s + n[0] * t, 3), round(o[1] + a[1] * s + n[1] * t, 3)]
         s = 0.0
@@ -199,28 +442,16 @@ def validate_job(job, reg):
                 continue
             if t == "end-panel" and 0 < ii < len(items) - 1:
                 errors.append(f"{iw}: end-panel must be the first or last item of a run")
+            if t == "end-panel" and it.get("style", "shaker") not in ("shaker", "slab", "slat"):
+                errors.append(f"{iw}: end-panel style must be shaker, slab or slat")
             if t == "cabinet":
-                rows = it.get("rows") or [{"height": "fill"}]
-                fixed = sum(r.get("height") for r in rows if num(r.get("height")))
-                fills = sum(1 for r in rows if not num(r.get("height")))
-                avail = rtop - base_h - 2 * margin
-                used = fixed + reveal * (len(rows) - 1)
-                if fills == 0 and abs(used - avail) > 0.25:
-                    warnings.append(f"{iw}: rows + reveals = {used:.2f} but front height is {avail:.2f}; use \"fill\" on one row")
-                if fills and used >= avail:
-                    errors.append(f"{iw}: fixed row heights ({used:.2f}) leave no room for the fill row (front height {avail:.2f})")
-                for r in rows:
-                    for f in r.get("fronts") or []:
-                        if f.get("style", "shaker") not in ("shaker", "slab", "none"):
-                            errors.append(f"{iw}: front style must be shaker, slab or none")
-                        for hw in ([f["hardware"]] if isinstance(f.get("hardware"), dict) else f.get("hardware") or []):
-                            if hw.get("type") not in ("knob", "bar"):
-                                errors.append(f"{iw}: hardware type must be knob or bar")
+                check_rows(it.get("rows"), rtop - bottom_front - 2 * margin, iw)
             items_out.append({"index": ii, "type": t, "id": it.get("id"), "label": it.get("label"), "width": w,
                               "from": P(s, 0), "to": P(s + w, 0)})
             s += w
         report["runs"].append({
-            "id": run.get("id"), "facing": run.get("facing"), "length": round(s, 3), "depth": depth,
+            "id": run.get("id"), "facing": run.get("facing"), "mount": mount, "length": round(s, 3), "depth": depth,
+            "frontsFrom": round(bottom_front, 3), "boxTop": rtop,
             "backLeft": P(0, 0), "backRight": P(s, 0), "frontLeft": P(0, depth + T), "frontRight": P(s, depth + T),
             "items": items_out,
         })
@@ -228,17 +459,45 @@ def validate_job(job, reg):
     for ci, c in enumerate(job.get("counters") or []):
         where = f'counters[{ci}] ("{c.get("id", "?")}")'
         need_mat(c.get("material"), where)
-        if not all(num(c.get(k)) for k in ("x0", "x1", "z0", "z1")):
-            errors.append(f"{where}: x0, x1, z0, z1 are required numbers")
-        elif c["x1"] <= c["x0"] or c["z1"] <= c["z0"]:
-            errors.append(f"{where}: needs x0 < x1 and z0 < z1")
-        for k in c.get("cutouts") or []:
-            if not all(num(k.get(q)) for q in ("x0", "x1", "z0", "z1")):
-                errors.append(f"{where}: cutouts need x0, x1, z0, z1")
-            elif all(num(c.get(q)) for q in ("x0", "x1", "z0", "z1")) and not (c["x0"] < k["x0"] < k["x1"] < c["x1"] and c["z0"] < k["z0"] < k["z1"] < c["z1"]):
-                errors.append(f"{where}: cutout must sit fully inside the counter")
-        if len(c.get("cutouts") or []) > 1:
-            warnings.append(f"{where}: only one cutout per counter is supported; split the counter into pieces")
+        if not c.get("material"):
+            errors.append(f"{where}: material is required")
+        edge = c.get("edge", "eased")
+        prof = edge.get("profile") if isinstance(edge, dict) else edge
+        if prof not in ("eased", "square", "mitered"):
+            errors.append(f'{where}: edge must be "eased", "square" or "mitered" (or {{"profile": ..., "height": ...}})')
+        cuts = c.get("cutouts") or []
+        for k in cuts:
+            if not all(num(k.get(q)) for q in ("x0", "x1", "z0", "z1")) or k["x1"] <= k["x0"] or k["z1"] <= k["z0"]:
+                errors.append(f"{where}: cutouts need x0 < x1 and z0 < z1")
+        wf = c.get("waterfall") or []
+        if c.get("outline") is not None:
+            ol = c["outline"]
+            if not (isinstance(ol, list) and len(ol) >= 3 and all(is_pt(p, 2) for p in ol)):
+                errors.append(f"{where}: outline must be a list of at least 3 [x, z] points")
+                continue
+            for k in cuts:
+                if all(num(k.get(q)) for q in ("x0", "x1", "z0", "z1")):
+                    corners = ((k["x0"], k["z0"]), (k["x1"], k["z0"]), (k["x1"], k["z1"]), (k["x0"], k["z1"]))
+                    if not all(point_in_poly(x, z, ol) for x, z in corners):
+                        errors.append(f"{where}: on an outline counter a cutout must sit fully inside the outline")
+            for w_ in wf:
+                e = w_.get("edge") if isinstance(w_, dict) else w_
+                if not (isinstance(e, int) and 0 <= e < len(ol)):
+                    errors.append(f"{where}: outline waterfalls are edge indexes 0..{len(ol) - 1} (edge i runs from point i to point i+1)")
+            report["counters"].append({"id": c.get("id"), "outline": ol, "cutouts": cuts})
+        else:
+            if not all(num(c.get(k)) for k in ("x0", "x1", "z0", "z1")):
+                errors.append(f"{where}: give x0, x1, z0, z1 (rectangle) or an outline")
+                continue
+            if c["x1"] <= c["x0"] or c["z1"] <= c["z0"]:
+                errors.append(f"{where}: needs x0 < x1 and z0 < z1")
+            for k in cuts:
+                if all(num(k.get(q)) for q in ("x0", "x1", "z0", "z1")) and (k["x1"] <= c["x0"] or k["x0"] >= c["x1"] or k["z1"] <= c["z0"] or k["z0"] >= c["z1"]):
+                    errors.append(f"{where}: a cutout does not overlap the counter")
+            for w_ in wf:
+                if w_ not in ("start", "end", "north", "south", "east", "west"):
+                    errors.append(f'{where}: rectangle waterfalls are "start", "end", "north", "south", "east" or "west"')
+            report["counters"].append({"id": c.get("id"), "outline": [[c["x0"], c["z0"]], [c["x1"], c["z0"]], [c["x1"], c["z1"]], [c["x0"], c["z1"]]], "cutouts": cuts})
 
     for oi, ob in enumerate(job.get("objects") or []):
         where = f'objects[{oi}] ("{ob.get("id") or ob.get("type")}")'
@@ -246,40 +505,104 @@ def validate_job(job, reg):
         if t not in OBJECT_TYPES:
             errors.append(f"{where}: type must be one of {sorted(OBJECT_TYPES)}")
             continue
-        need_mat(ob.get("material"), where)
-        need_mat(ob.get("glass"), where)
-        if t in ("box", "wall"):
+        for k in ("material", "glass", "grateMaterial", "knobMaterial"):
+            need_mat(ob.get(k), f"{where} {k}")
+        rect4 = all(num(ob.get(q)) for q in ("x0", "x1", "z0", "z1"))
+        if t in ("box", "wall", "paneling"):
             mn, mx = ob.get("min"), ob.get("max")
-            if not (isinstance(mn, list) and isinstance(mx, list) and len(mn) == 3 and len(mx) == 3 and all(num(v) for v in mn + mx)):
+            if not (is_pt(mn, 3) and is_pt(mx, 3)):
                 errors.append(f"{where}: min and max must be [x, y, z]")
             elif any(mx[i] <= mn[i] for i in range(3)):
                 errors.append(f"{where}: every max value must be larger than the matching min value")
+            else:
+                report["objects"].append({"id": ob.get("id"), "type": t, "rect": [mn[0], mx[0], mn[2], mx[2]], "top": mx[1]})
             if t == "box" and not ob.get("material"):
                 errors.append(f"{where}: material is required")
+            if t == "paneling" and ob.get("facing") not in FACINGS:
+                errors.append(f"{where}: paneling needs facing N, S, E or W (the side facing the room)")
             for op in ob.get("openings") or []:
                 need_mat(op.get("jamb"), where + " opening jamb")
                 need_mat(op.get("glassMaterial"), where + " opening glass")
+                need_mat(op.get("panelMaterial"), where + " opening panel")
                 need_mat((op.get("trim") or {}).get("material"), where + " opening trim")
-                if not all(num(op.get(q)) for q in ("a0", "a1", "y0", "y1")):
-                    errors.append(f"{where}: openings need a0, a1 (along the wall) and y0, y1")
+                need_mat((op.get("frame") or {}).get("material"), where + " opening frame")
+                need_mat((op.get("mullions") or op.get("muntins") or {}).get("material"), where + " opening mullions")
+                if op.get("kind", "window") not in ("window", "door"):
+                    errors.append(f'{where}: opening kind must be "window" or "door"')
+                if op.get("shape") is not None:
+                    if not (isinstance(op["shape"], list) and len(op["shape"]) >= 3 and all(is_pt(p, 2) for p in op["shape"])):
+                        errors.append(f"{where}: opening shape must be at least 3 [along, height] points")
+                else:
+                    need = ("a0", "a1", "y1") if op.get("kind") == "door" else ("a0", "a1", "y0", "y1")
+                    if not all(num(op.get(q)) for q in need):
+                        errors.append(f"{where}: openings need {', '.join(need)} (a = along the wall), or a shape polygon")
+                if op.get("swing") not in (None, "left", "right"):
+                    errors.append(f'{where}: door swing must be "left" or "right"')
         if t in ("faucet", "outlet"):
-            p = ob.get("position")
-            if not (isinstance(p, list) and len(p) == 3 and all(num(v) for v in p)):
+            if not is_pt(ob.get("position"), 3):
                 errors.append(f"{where}: position must be [x, y, z]")
             if ob.get("facing", "S") not in FACINGS:
                 errors.append(f"{where}: facing must be N, S, E or W")
-        if t == "sink" and not all(num(ob.get(q)) for q in ("x0", "x1", "z0", "z1")):
-            errors.append(f"{where}: x0, x1, z0, z1 are required")
+        if t in ("sink", "rangetop", "hood", "shelf"):
+            if not rect4:
+                errors.append(f"{where}: x0, x1, z0, z1 are required")
+            else:
+                report["objects"].append({"id": ob.get("id"), "type": t, "rect": [ob["x0"], ob["x1"], ob["z0"], ob["z1"]]})
+        if t == "sink" and "drain" in ob:
+            dr = ob["drain"]
+            if isinstance(dr, dict):
+                if "diameter" in dr and not (num(dr["diameter"]) and dr["diameter"] > 0):
+                    errors.append(f"{where}: drain.diameter must be a positive number (inches)")
+                if "position" in dr and not is_pt(dr["position"], 2):
+                    errors.append(f"{where}: drain.position must be [x, z]")
+                need_mat(dr.get("material"), where + " drain")
+            elif not isinstance(dr, bool):
+                errors.append(f"{where}: drain must be true, false or {{diameter, position, material}}")
+        if t == "rangetop" and ob.get("facing", "S") not in FACINGS:
+            errors.append(f"{where}: facing (the side with the control knobs) must be N, S, E or W")
+        if t == "hood":
+            if not (num(ob.get("bottom")) and num(ob.get("top")) and ob["top"] > ob["bottom"]):
+                errors.append(f"{where}: hood needs bottom and top heights (top > bottom)")
+            if ob.get("shape", "box") not in ("box", "tapered"):
+                errors.append(f'{where}: hood shape must be "box" or "tapered"')
+            if ob.get("wall", "N") not in FACINGS:
+                errors.append(f"{where}: hood wall (side against the wall) must be N, S, E or W")
+            ch = ob.get("chimney") or {}
+            if ch and ch.get("shape", "square") not in ("round", "square"):
+                errors.append(f'{where}: chimney shape must be "round" or "square"')
+            need_mat((ob.get("band") or {}).get("material"), where + " band")
+        if t == "shelf" and not num(ob.get("y")):
+            errors.append(f"{where}: shelf needs y (height of the shelf top)")
+        if t == "leg":
+            if not (is_pt(ob.get("position"), 2) and num(ob.get("height"))):
+                errors.append(f"{where}: leg needs position [x, z] and height")
+            else:
+                s_ = ob.get("size", 4) / 2
+                report["objects"].append({"id": ob.get("id"), "type": t, "rect": [ob["position"][0] - s_, ob["position"][0] + s_, ob["position"][1] - s_, ob["position"][1] + s_]})
+        if t == "ceiling":
+            if not (is_pt(ob.get("min"), 2) and is_pt(ob.get("max"), 2) and num(ob.get("height"))):
+                errors.append(f"{where}: ceiling needs min [x, z], max [x, z] and height")
+            sl = ob.get("slope")
+            if sl and not (sl.get("axis") in ("x", "z") and num(sl.get("rise")) and num(sl.get("run")) and sl["run"] != 0):
+                errors.append(f'{where}: slope needs axis "x" or "z", rise and run (and optional from)')
+            if "hiddenFromAbove" in ob and not isinstance(ob["hiddenFromAbove"], bool):
+                errors.append(f"{where}: hiddenFromAbove must be true (cutaway, default) or false (solid from above)")
+            if is_pt(ob.get("min"), 2) and is_pt(ob.get("max"), 2) and (ob["min"][0] == ob["max"][0] or ob["min"][1] == ob["max"][1]):
+                errors.append(f"{where}: ceiling min and max must differ in both x and z")
+        if t == "led-strip" and not (is_pt(ob.get("from"), 3) and is_pt(ob.get("to"), 3)):
+            errors.append(f"{where}: led-strip needs from [x, y, z] and to [x, y, z]")
         if t == "tube-shelving":
             posts = ob.get("posts") or []
             for lv in ob.get("levels") or []:
-                b = lv.get("between") or []
-                if len(b) != 2 or not all(isinstance(i, int) and 0 <= i < len(posts) for i in b):
+                b_ = lv.get("between") or []
+                if len(b_) != 2 or not all(isinstance(i, int) and 0 <= i < len(posts) for i in b_):
                     errors.append(f"{where}: level between must be two indexes into posts")
+
+    warnings.extend(coplanar_warnings(job))
 
     views = job.get("views") or []
     if not views:
-        warnings.append("no views defined; a default camera will be used")
+        warnings.append("no views defined; automatic overview + north/east/south/west views will be used")
     vids = set()
     for vi, v in enumerate(views):
         if v.get("id") in vids:
@@ -288,9 +611,9 @@ def validate_job(job, reg):
         if not re.match(r"^[a-z0-9][a-z0-9-]*$", str(v.get("id", ""))):
             errors.append(f"views[{vi}]: id must be lowercase letters, digits, hyphens")
         for k in ("position", "target"):
-            p = v.get(k)
-            if not (isinstance(p, list) and len(p) == 3 and all(num(q) for q in p)):
+            if not is_pt(v.get(k), 3):
                 errors.append(f"views[{vi}] ({v.get('id')}): {k} must be [x, y, z]")
+    report["views"] = view_ids(job)
     return errors, warnings, report
 
 
@@ -361,9 +684,9 @@ def make_handler(events):
         def _index(self):
             rows = []
             for j in list_jobs():
-                name = urllib.parse.quote(j["name"])
+                name = urllib.parse.quote(j["ref"])
                 srcs = "".join(f'<li><a href="/engine/pdf.html?file={urllib.parse.quote(s)}&grid=1">{s}</a></li>' for s in j["sources"])
-                rows.append(f'<h2>{j["title"]}</h2><p><a href="/engine/viewer.html?job={name}">Open 3D viewer</a> &middot; job folder jobs/{j["name"]}</p><ul>{srcs}</ul>')
+                rows.append(f'<h2>{j["title"]}</h2><p><a href="/engine/viewer.html?job={name}">Open 3D viewer</a> &middot; job folder jobs/{j["ref"]}</p><ul>{srcs}</ul>')
             html = ("<!doctype html><meta charset='utf-8'><title>Cabinet Preview Renderer</title>"
                     "<body style='font:14px system-ui;margin:24px'><h1>Cabinet Preview Renderer</h1>"
                     + ("".join(rows) or "<p>No jobs yet. Run new-job.</p>") + "</body>").encode()
@@ -378,9 +701,8 @@ def make_handler(events):
 
 def list_jobs():
     out = []
-    if not JOBS.exists():
-        return out
-    for d in sorted(JOBS.iterdir()):
+    folders = [d for root_ in (JOBS, EXAMPLE_JOBS) if root_.exists() for d in sorted(root_.iterdir()) if d.is_dir()]
+    for d in folders:
         jf = d / "job.json"
         if not jf.is_file():
             continue
@@ -389,7 +711,7 @@ def list_jobs():
         except CprError:
             title = d.name + " (invalid JSON)"
         srcs = sorted(rel(p) for p in (d / "source").glob("*") if p.suffix.lower() == ".pdf") if (d / "source").exists() else []
-        out.append({"name": d.name, "title": title, "sources": srcs})
+        out.append({"name": d.name, "ref": job_ref(d), "example": d.parent == EXAMPLE_JOBS, "title": title, "sources": srcs})
     return out
 
 
@@ -508,15 +830,18 @@ def cmd_doctor(a):
     for p in probs:
         print("  - " + p)
     jobs = list_jobs()
-    print(f"jobs         : {', '.join(j['name'] for j in jobs) or 'none'}")
-    print("network      : the viewer loads three.js and pdf.js from cdn.jsdelivr.net / cdnjs.cloudflare.com (internet needed)")
+    print(f"jobs         : {', '.join(j['name'] for j in jobs if not j['example']) or 'none'}")
+    print(f"examples     : {', '.join(j['name'] for j in jobs if j['example']) or 'none'}   (in jobs/examples/)")
+    missing = [f for f in VENDOR_FILES if not (VENDOR / f).is_file()]
+    print("libraries    : " + ("vendor/ complete (works offline)" if not missing else "vendor/ missing " + ", ".join(missing) + " -> pages use the internet CDN; run: vendor"))
     return 0 if ok and not probs else 1
 
 
 def cmd_new_job(a):
     d = job_dir(a.name)
-    if (d / "job.json").exists():
-        raise CprError(f"Job {a.name} already exists at {rel(d)}.")
+    existing = find_job(a.name)
+    if existing:
+        raise CprError(f"Job {a.name} already exists at {rel(existing)}.")
     tmpl = load_json(ROOT / "templates" / "job.template.json")
     tmpl["info"]["title"] = a.title or a.name.replace("-", " ").title()
     save_json(d / "job.json", tmpl)
@@ -564,11 +889,12 @@ def cmd_validate(a):
         print("  warning " + w)
     print("\nRun geometry (world inches; x = east/right on plan, z = south/down on plan):")
     for r in report["runs"]:
-        print(f"  run {r['id']} facing {r['facing']}: length {r['length']}, depth {r['depth']}")
+        print(f"  run {r['id']} ({r['mount']}) facing {r['facing']}: length {r['length']}, depth {r['depth']}, fronts {r['frontsFrom']} to {r['boxTop']}")
         print(f"    back  {r['backLeft']} -> {r['backRight']}")
         print(f"    front {r['frontLeft']} -> {r['frontRight']}  (front face of doors)")
         for it in r["items"]:
             print(f"      [{it['index']}] {it['type']:<9} w={it['width']:<7} {it['from']} -> {it['to']}  {it['label'] or it['id'] or ''}")
+    print("\nViews: " + ", ".join(report["views"]) + ("   (includes automatic views)" if (not job.get("views") or job.get("autoViews")) else ""))
     return 1 if errors else 0
 
 
@@ -577,8 +903,8 @@ def cmd_serve(a):
     base = f"http://{a.host}:{a.port}"
     print(f"Serving {ROOT} at {base}/  (Ctrl+C to stop)")
     for j in list_jobs():
-        print(f"  viewer : {base}/engine/viewer.html?job={j['name']}")
-        print(f"  capture: {base}/engine/viewer.html?job={j['name']}&capture=1&save=all   (saves PNGs to jobs/{j['name']}/output/)")
+        print(f"  viewer : {base}/engine/viewer.html?job={urllib.parse.quote(j['ref'])}")
+        print(f"  capture: {base}/engine/viewer.html?job={urllib.parse.quote(j['ref'])}&capture=1&save=all   (saves PNGs to jobs/{j['ref']}/output/)")
         for s in j["sources"]:
             print(f"  pdf    : {base}/engine/pdf.html?file={urllib.parse.quote(s)}&grid=1")
     sys.stdout.flush()
@@ -592,7 +918,69 @@ def cmd_serve(a):
     return 0
 
 
-def build_standalone(name, out=None):
+VENDOR = ROOT / "vendor"
+VENDOR_FILES = {
+    "three.min.js": "https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js",
+    "OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js",
+    "RoomEnvironment.js": "https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js",
+    "pdf.min.js": "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+    "pdf.worker.min.js": "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+}
+VIEWER_LIBS = ["three.min.js", "OrbitControls.js", "RoomEnvironment.js"]
+CDN_LIBS_HTML = ('<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>\n'
+                 '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>\n'
+                 '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/environments/RoomEnvironment.js"></script>')
+
+
+def fetch_vendor(force=False, quiet=False):
+    """Download the pinned browser libraries into vendor/ (skips files already there)."""
+    import urllib.request
+    VENDOR.mkdir(exist_ok=True)
+    got = []
+    for name, url in VENDOR_FILES.items():
+        dest = VENDOR / name
+        if dest.is_file() and dest.stat().st_size > 1000 and not force:
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                data = r.read()
+        except Exception as e:
+            raise CprError(f"Could not download {url}: {e}. Check the internet connection, or copy the file into vendor/ by hand.")
+        dest.write_bytes(data)
+        got.append(name)
+        if not quiet:
+            print(f"Downloaded vendor/{name} ({len(data) // 1024} KB)")
+    return got
+
+
+def cmd_vendor(a):
+    got = fetch_vendor(force=a.force)
+    if not got:
+        print("vendor/ already has every library. Use --force to download again.")
+    return 0
+
+
+def all_strings(o):
+    if isinstance(o, str):
+        yield o
+    elif isinstance(o, dict):
+        for v in o.values():
+            yield from all_strings(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from all_strings(v)
+
+
+def used_materials(job):
+    """Every registry id that the job could reference (any string value), plus bases of job materials."""
+    used = set(all_strings(job))
+    used |= {m.get("base") for m in (job.get("materials") or {}).values() if isinstance(m, dict)}
+    used.discard(None)
+    return used
+
+
+def build_standalone(name, out=None, libs="auto"):
+    """libs: "inline" (put three.js inside the file, works offline), "cdn" (small file, needs internet), "auto" (inline when vendor/ has the files)."""
     d = require_job(name)
     reg = load_registry()
     job = load_json(d / "job.json")
@@ -600,20 +988,29 @@ def build_standalone(name, out=None):
     if errors:
         raise CprError("Fix validation errors first:\n  " + "\n  ".join(errors))
     html = (ENGINE / "viewer.html").read_text(encoding="utf-8")
-    used = used_materials(job)
     images = {}
-    for mid in used:
+    for mid in used_materials(job):
         m = reg["materials"].get(mid, {})
         if m.get("kind") == "image":
             p = TEXTURES / m["file"]
             mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}[p.suffix.lower().lstrip(".")]
             images[mid] = f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()
-    boot = {"job": job, "registry": {"materials": {k: v for k, v in reg["materials"].items()}}, "images": images}
+    boot = {"job": job, "registry": {"materials": dict(reg["materials"])}, "images": images}
 
     def script(js):
         return "<script>\n" + js.replace("</script", "<\\/script") + "\n</script>"
+    have_vendor = all((VENDOR / f).is_file() for f in VIEWER_LIBS)
+    if libs == "inline" and not have_vendor:
+        fetch_vendor(quiet=True)
+        have_vendor = True
+    if libs == "inline" or (libs == "auto" and have_vendor):
+        libs_html = "\n".join(script((VENDOR / f).read_text(encoding="utf-8")) for f in VIEWER_LIBS)
+        mode = "inline"
+    else:
+        libs_html, mode = CDN_LIBS_HTML, "cdn"
     engine_js = script((ENGINE / "textures.js").read_text(encoding="utf-8")) + "\n" + script((ENGINE / "engine.js").read_text(encoding="utf-8"))
     boot_js = script("window.CPR_BOOT = " + json.dumps(boot).replace("</", "<\\/") + ";")
+    html = re.sub(r"<!--CPR:LIBS-->.*?<!--/CPR:LIBS-->", lambda m: libs_html, html, flags=re.S)
     html = re.sub(r"<!--CPR:ENGINE-->.*?<!--/CPR:ENGINE-->", lambda m: engine_js, html, flags=re.S)
     html = html.replace("<!--CPR:BOOT-->", boot_js + "\n<!--CPR:BOOT-->")
     title = (job.get("info") or {}).get("title") or name
@@ -621,30 +1018,144 @@ def build_standalone(name, out=None):
     out = Path(out) if out else d / "output" / f"{name}.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8", newline="\n")
-    return out
-
-
-def used_materials(job):
-    used = set((job.get("finishes") or {}).values())
-    used |= {"rift-white-oak-light-bleached", "bead-groove", "toe-kick-shadow", "satin-nickel", "floor-neutral",
-             "stainless", "clear-glass", "window-sky", "outlet-plate"}
-    for c in job.get("counters") or []:
-        used.add(c.get("material"))
-    for o in job.get("objects") or []:
-        for k in ("material", "glass"):
-            if o.get(k):
-                used.add(o[k])
-        for op in o.get("openings") or []:
-            used |= {op.get("jamb"), op.get("glassMaterial"), (op.get("trim") or {}).get("material")}
-    if (job.get("floor") or {}).get("material"):
-        used.add(job["floor"]["material"])
-    used.discard(None)
-    return used
+    return out, mode
 
 
 def cmd_build(a):
-    out = build_standalone(a.job, a.out)
-    print(f"Built {rel(out)} ({out.stat().st_size // 1024} KB). It opens by double-click in any browser (internet needed for three.js).")
+    libs = "inline" if a.inline_libs else "cdn" if a.cdn else "auto"
+    out, mode = build_standalone(a.job, a.out, libs)
+    note = "three.js is inside the file: it works offline and in sandboxed file previews" if mode == "inline" else "loads three.js from the internet"
+    print(f"Built {rel(out)} ({out.stat().st_size // 1024} KB); {note}. Opens by double-click in any browser.")
+    return 0
+
+
+def cmd_open(a):
+    """Build the standalone viewer and open it in the computer's default browser."""
+    import webbrowser
+    out, mode = build_standalone(a.job, None, "auto")
+    print(f"Built {rel(out)} ({'offline-capable' if mode == 'inline' else 'needs internet'})")
+    if a.no_launch:
+        print(f"File: {out.resolve()}")
+        return 0
+    ok = webbrowser.open(out.resolve().as_uri())
+    print(("Opened in the default browser: " if ok else "Could not launch a browser. Open this file yourself: ") + str(out.resolve()))
+    return 0
+
+
+# ----------------------------------------------------------------------------- plan (top-down SVG)
+def plan_svg(job, report, title):
+    pts = []
+    for r in report["runs"]:
+        pts += [r["backLeft"], r["backRight"], r["frontLeft"], r["frontRight"]]
+    for c in report["counters"]:
+        pts += c["outline"]
+    for o in report["objects"]:
+        x0, x1, z0, z1 = o["rect"]
+        pts += [[x0, z0], [x1, z1]]
+    vids = []
+    for v in job.get("views") or []:
+        pts.append([v["position"][0], v["position"][2]])
+        vids.append(v)
+    if not pts:
+        raise CprError("Nothing to draw: the job has no runs, counters or objects.")
+    xs, zs = [p[0] for p in pts], [p[1] for p in pts]
+    minx, maxx, minz, maxz = min(xs) - 24, max(xs) + 24, min(zs) - 24, max(zs) + 40
+    S = 4.0                                     # px per inch
+    W, H = (maxx - minx) * S, (maxz - minz) * S
+    X = lambda x: round((x - minx) * S, 2)
+    Z = lambda z: round((z - minz) * S, 2)
+    poly = lambda ps: " ".join(f"{X(p[0])},{Z(p[1])}" for p in ps)
+    esc = lambda t: str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" viewBox="0 0 {W:.0f} {H:.0f}" font-family="Arial, sans-serif">',
+           f'<rect width="100%" height="100%" fill="#ffffff"/>']
+    # 12" grid
+    gx = int(minx // 12) * 12
+    while gx <= maxx:
+        out.append(f'<line x1="{X(gx)}" y1="0" x2="{X(gx)}" y2="{H:.0f}" stroke="#eeeeee" stroke-width="1"/>')
+        gx += 12
+    gz = int(minz // 12) * 12
+    while gz <= maxz:
+        out.append(f'<line x1="0" y1="{Z(gz)}" x2="{W:.0f}" y2="{Z(gz)}" stroke="#eeeeee" stroke-width="1"/>')
+        gz += 12
+    # walls / boxes / objects
+    style = {"wall": ('#9a968e', '#5c5952'), "box": ('#e4e1da', '#a7a39a'), "paneling": ('#b99b7a', '#7a6248'),
+             "sink": ('#ffffff', '#555555'), "rangetop": ('#cfd1d1', '#333333'), "hood": ('none', '#c03a2b'),
+             "shelf": ('#e9dcc6', '#8a7350'), "leg": ('#8a7350', '#5a4a33')}
+    for o in sorted(report["objects"], key=lambda o: 0 if o["type"] in ("box", "wall") else 1):
+        x0, x1, z0, z1 = o["rect"]
+        fill, stroke = style.get(o["type"], ('none', '#777777'))
+        dash = ' stroke-dasharray="6 4"' if o["type"] == "hood" else ''
+        out.append(f'<rect x="{X(x0)}" y="{Z(z0)}" width="{(x1 - x0) * S:.1f}" height="{(z1 - z0) * S:.1f}" fill="{fill}" fill-opacity="0.85" stroke="{stroke}" stroke-width="1.2"{dash}/>')
+    # counters
+    for c in report["counters"]:
+        out.append(f'<polygon points="{poly(c["outline"])}" fill="#f3ece0" fill-opacity="0.55" stroke="#b28f5f" stroke-width="1.5" stroke-dasharray="8 4"/>')
+        for k in c["cutouts"]:
+            out.append(f'<rect x="{X(k["x0"])}" y="{Z(k["z0"])}" width="{(k["x1"] - k["x0"]) * S:.1f}" height="{(k["z1"] - k["z0"]) * S:.1f}" fill="#ffffff" stroke="#b28f5f" stroke-width="1"/>')
+    # runs
+    for r in report["runs"]:
+        wall = r["mount"] == "wall"
+        fill = "none" if wall else "#d8c9a8"
+        dash = ' stroke-dasharray="10 5"' if wall else ""
+        col = "#2b6cb0" if wall else "#5b4a2e"
+        out.append(f'<polygon points="{poly([r["backLeft"], r["backRight"], r["frontRight"], r["frontLeft"]])}" fill="{fill}" fill-opacity="0.8" stroke="{col}" stroke-width="1.5"{dash}/>')
+        out.append(f'<line x1="{X(r["frontLeft"][0])}" y1="{Z(r["frontLeft"][1])}" x2="{X(r["frontRight"][0])}" y2="{Z(r["frontRight"][1])}" stroke="{col}" stroke-width="4"{dash}/>')
+        bl, fl = r["backLeft"], r["frontLeft"]
+        dvx, dvz = fl[0] - bl[0], fl[1] - bl[1]
+        for it in r["items"][1:]:
+            p0 = it["from"]
+            out.append(f'<line x1="{X(p0[0])}" y1="{Z(p0[1])}" x2="{X(p0[0] + dvx)}" y2="{Z(p0[1] + dvz)}" stroke="{col}" stroke-width="0.8"/>')
+        for it in r["items"]:
+            if it["type"] != "cabinet":
+                continue
+            mx = (it["from"][0] + it["to"][0]) / 2 + dvx / 2
+            mz = (it["from"][1] + it["to"][1]) / 2 + dvz / 2
+            out.append(f'<text x="{X(mx)}" y="{Z(mz) + 4}" font-size="10" text-anchor="middle" fill="{col}">{esc(it["id"] or "")} {it["width"]:g}"</text>')
+        cx = (r["backLeft"][0] + r["frontRight"][0]) / 2
+        cz = (r["backLeft"][1] + r["frontRight"][1]) / 2
+        out.append(f'<text x="{X(cx)}" y="{Z(cz) - 8}" font-size="12" font-weight="bold" text-anchor="middle" fill="{col}">{esc(r["id"])}{" (wall)" if wall else ""}</text>')
+    # cameras
+    for v in vids:
+        px, pz = v["position"][0], v["position"][2]
+        tx, tz = v["target"][0], v["target"][2]
+        out.append(f'<line x1="{X(px)}" y1="{Z(pz)}" x2="{X(tx)}" y2="{Z(tz)}" stroke="#c03a2b" stroke-width="1" stroke-dasharray="3 3"/>')
+        out.append(f'<circle cx="{X(px)}" cy="{Z(pz)}" r="5" fill="#c03a2b"/>')
+        out.append(f'<text x="{X(px) + 7}" y="{Z(pz) - 6}" font-size="11" fill="#c03a2b">{esc(v["id"])}</text>')
+    # north arrow, scale bar, title
+    out.append(f'<g transform="translate({W - 40:.0f},40)"><polygon points="0,-24 8,4 0,-2 -8,4" fill="#222"/><text x="0" y="20" font-size="13" text-anchor="middle">N</text></g>')
+    out.append(f'<line x1="20" y1="{H - 20:.0f}" x2="{20 + 48 * S:.0f}" y2="{H - 20:.0f}" stroke="#222" stroke-width="3"/>')
+    out.append(f'<text x="20" y="{H - 28:.0f}" font-size="11">0</text><text x="{20 + 48 * S:.0f}" y="{H - 28:.0f}" font-size="11" text-anchor="end">48"</text>')
+    out.append(f'<text x="20" y="24" font-size="15" font-weight="bold">{esc(title)} - plan check</text>')
+    out.append('<text x="20" y="42" font-size="11" fill="#555">Grid 12". Brown = floor cabinets (thick line = door faces), blue dashed = wall cabinets, tan dashed = counters, red = cameras.</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def cmd_plan(a):
+    d = require_job(a.job)
+    reg = load_registry()
+    job = load_json(d / "job.json")
+    errors, _, report = validate_job(job, reg)
+    if errors:
+        raise CprError("Fix validation errors first:\n  " + "\n  ".join(errors))
+    svg = plan_svg(job, report, (job.get("info") or {}).get("title") or a.job)
+    out = d / "output" / f"{a.job}-plan.svg"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(svg, encoding="utf-8")
+    print(f"Wrote {rel(out)}")
+    if a.no_png:
+        return 0
+    png_rel = rel(d / "output" / f"{a.job}-plan.png")
+    port = free_port()
+    httpd, events = start_server(port)
+    try:
+        q = urllib.parse.urlencode({"src": rel(out), "save": png_rel})
+        run_headless(f"http://127.0.0.1:{port}/engine/svg2png.html?{q}", (1280, 960), 1, a.timeout, events, a.browser)
+    except CprError as e:
+        print(f"PNG not made ({e}). The SVG is still there.")
+        return 0
+    finally:
+        httpd.shutdown()
+    print(f"Wrote {png_rel}")
     return 0
 
 
@@ -655,7 +1166,7 @@ def cmd_capture(a):
     errors, warnings, _ = validate_job(job, reg)
     if errors:
         raise CprError("Fix validation errors first:\n  " + "\n  ".join(errors))
-    views = [v["id"] for v in job.get("views") or []]
+    views = view_ids(job)
     want = views if a.views == "all" else [v.strip() for v in a.views.split(",") if v.strip()]
     missing = [v for v in want if v not in views]
     if missing:
@@ -664,7 +1175,7 @@ def cmd_capture(a):
     port = free_port()
     httpd, events = start_server(port)
     try:
-        url = (f"http://127.0.0.1:{port}/engine/viewer.html?job={urllib.parse.quote(a.job)}&capture=1"
+        url = (f"http://127.0.0.1:{port}/engine/viewer.html?job={urllib.parse.quote(job_ref(d))}&capture=1"
                f"&save={urllib.parse.quote(','.join(want))}&w={w}&h={h}")
         print(f"Rendering {len(want)} view(s) at {w}x{h} with a headless browser...")
         sys.stdout.flush()
@@ -736,7 +1247,9 @@ def cmd_textures_list(a):
         return 0
     for mid, d in sorted(reg["materials"].items(), key=lambda kv: (kv[1].get("category", ""), kv[0])):
         extra = d.get("generator") or d.get("file") or d.get("color") or ""
-        print(f"  {mid:<34} {d.get('category', '-'):<8} {d.get('kind'):<10} {extra:<16} {d.get('label', '')}")
+        cu = " [CUSTOMISABLE: " + ", ".join(f"{k}={v}" for k, v in d["custom"].items()) + "]" if isinstance(d.get("custom"), dict) else ""
+        print(f"  {mid:<34} {d.get('category', '-'):<8} {d.get('kind'):<10} {extra:<16} {d.get('label', '')}{cu}")
+    print('\nCUSTOMISABLE bases can be copied into a job with their own colour/gloss: run "job-material --help".')
     probs = registry_problems(reg)
     for p in probs:
         print("  PROBLEM " + p)
@@ -763,6 +1276,50 @@ def cmd_textures_add(a):
     }
     save_json(REGISTRY, reg)
     print(f'Registered "{a.id}" -> textures/{dest.relative_to(TEXTURES).as_posix()} (one image tile = {a.repeat[0]}" x {a.repeat[1]}")')
+    return 0
+
+
+def cmd_job_material(a):
+    d = require_job(a.job)
+    reg = load_registry()
+    path = d / "job.json"
+    job = load_json(path)
+    mats = job.setdefault("materials", {})
+    if a.list:
+        if not mats:
+            print(f"Job {a.job} has no custom materials.")
+        for mid, inst in mats.items():
+            print(f"  {mid:<24} " + ", ".join(f"{k}={v}" for k, v in inst.items()))
+        return 0
+    if not a.id:
+        raise CprError("Give a material id, or --list.")
+    if a.remove:
+        if a.id not in mats:
+            raise CprError(f'Job {a.job} has no custom material "{a.id}".')
+        del mats[a.id]
+        if not mats:
+            job.pop("materials")
+        save_json(path, job)
+        print(f'Removed "{a.id}". Anything still using it will fail validation.')
+        return 0
+    inst = dict(mats.get(a.id, {}))
+    if a.base:
+        inst["base"] = a.base
+    for k in ("color", "gloss", "seed", "label"):
+        v = getattr(a, k)
+        if v is not None:
+            inst[k] = v
+    if a.grain_contrast is not None:
+        inst["grainContrast"] = a.grain_contrast
+    if "base" not in inst:
+        raise CprError("New custom materials need --base (for example custom-rift, custom-plain, custom-metal).")
+    probs = custom_problems(a.id, inst, reg)
+    if probs:
+        raise CprError("\n  ".join(probs))
+    mats[a.id] = inst
+    save_json(path, job)
+    print(f'Set job material "{a.id}": ' + ", ".join(f"{k}={v}" for k, v in inst.items()))
+    print('Use it by id, e.g. "finishes": {"cabinet": "' + a.id + '"} or a run\'s "finishes".')
     return 0
 
 
@@ -807,7 +1364,7 @@ def main(argv=None):
     s.add_argument("--browser", help="path to Chrome/Edge/Chromium")
     s.set_defaults(fn=cmd_doctor)
 
-    s = sub.add_parser("new-job", help="create jobs/<name>/ from the template")
+    s = sub.add_parser("new-job", help="create jobs/<name>/ from the template (jobs are looked up in jobs/ and jobs/examples/)")
     s.add_argument("name", help="lowercase-hyphen name, e.g. moore-bar")
     s.add_argument("--title", help="display title")
     s.add_argument("--source", action="append", help="drawing file (PDF/image) to copy into the job's source/ folder; repeatable")
@@ -831,7 +1388,25 @@ def main(argv=None):
     s = sub.add_parser("build", help="write a single self-contained HTML viewer for a job")
     s.add_argument("job")
     s.add_argument("--out", help="output .html path (default jobs/<job>/output/<job>.html)")
+    s.add_argument("--inline-libs", action="store_true", help="put three.js inside the file (works offline / in sandboxed previews); default when vendor/ has the files")
+    s.add_argument("--cdn", action="store_true", help="load three.js from the internet instead (smaller file)")
     s.set_defaults(fn=cmd_build)
+
+    s = sub.add_parser("open", help="build the HTML viewer and open it in the default web browser")
+    s.add_argument("job")
+    s.add_argument("--no-launch", action="store_true", help="only build and print the file path")
+    s.set_defaults(fn=cmd_open)
+
+    s = sub.add_parser("plan", help="draw a top-down plan check (SVG + PNG) of runs, counters, walls and cameras")
+    s.add_argument("job")
+    s.add_argument("--no-png", action="store_true", help="SVG only (no browser needed)")
+    s.add_argument("--browser", help="path to Chrome/Edge/Chromium")
+    s.add_argument("--timeout", type=int, default=120)
+    s.set_defaults(fn=cmd_plan)
+
+    s = sub.add_parser("vendor", help="download the pinned three.js / pdf.js files into vendor/ for offline use")
+    s.add_argument("--force", action="store_true", help="download again even if present")
+    s.set_defaults(fn=cmd_vendor)
 
     s = sub.add_parser("capture", help="render job views to PNG with a headless browser")
     s.add_argument("job")
@@ -869,9 +1444,25 @@ def main(argv=None):
     t.set_defaults(fn=cmd_textures_add)
     textures_parser = s
 
+    s = sub.add_parser("job-material", help="add/change/remove a custom-coloured material inside a job",
+                       description="Creates or updates job.materials[ID], a copy of a CUSTOMISABLE registry material "
+                                   "(see 'textures list') with its own colour/gloss. Example: "
+                                   "job-material smith-kitchen sage-rift --base custom-rift --color \"#7d8b6a\" --gloss 0.3")
+    s.add_argument("job")
+    s.add_argument("id", nargs="?", help="material id to create or change, e.g. sage-rift")
+    s.add_argument("--base", help="customisable registry material: custom-rift, custom-plain, custom-metal, ...")
+    s.add_argument("--color", help='sRGB hex, e.g. "#8a5a3b" (quote it in shells)')
+    s.add_argument("--gloss", type=float, help="0 = matte ... 1 = high gloss")
+    s.add_argument("--seed", type=int, help="woods: different grain pattern")
+    s.add_argument("--grain-contrast", type=float, help="woods: 0..1 darkness of grain lines (default 0.42)")
+    s.add_argument("--label", help="description")
+    s.add_argument("--remove", action="store_true", help="delete this custom material from the job")
+    s.add_argument("--list", action="store_true", help="list the job's custom materials")
+    s.set_defaults(fn=cmd_job_material)
+
     s = sub.add_parser("package", help="zip the project for handing to someone else")
     s.add_argument("--out", help="zip path (default: next to the project folder)")
-    s.add_argument("--include-outputs", action="store_true", help="include jobs/*/output")
+    s.add_argument("--include-outputs", action="store_true", help="include jobs/*/output (renders)")
     s.add_argument("--include-sources", action="store_true", help="include jobs/*/source (client drawings)")
     s.add_argument("--no-runtime", action="store_true", help="leave out the bundled Windows Python")
     s.set_defaults(fn=cmd_package)

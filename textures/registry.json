@@ -1,21 +1,80 @@
 {
-  "_comment": "Material/texture registry. Every material a job can reference is listed here by id. kind: procedural (drawn by a generator in engine/textures.js), image (a file in this textures/ folder), color, metal, glass, sky. repeatInches = real-world size of one texture tile in inches [u, v]. Add image textures with: run tools textures-add.",
+  "_comment": "Material/texture registry. Every material a job can reference is listed here by id. Entries with a \"custom\" block (custom-rift, custom-plain, custom-metal) are bases a job can copy with its own color/gloss via job.materials (tool: job-material). kind: procedural (drawn by a generator in engine/textures.js), image (a file in this textures/ folder), color, metal, glass, sky. repeatInches = real-world size of one texture tile in inches [u, v]. Add image textures with: run tools textures-add.",
   "materials": {
     "rift-white-oak-light-bleached": {
       "label": "Rift cut white oak, light bleached",
       "category": "wood",
       "kind": "procedural",
-      "generator": "wood",
-      "params": { "base": "#dccdb2", "dark": [150, 126, 92], "light": [245, 238, 224], "lines": 420, "seed": 7 },
+      "generator": "wood-rift",
+      "params": {
+        "base": "#dccdb2",
+        "dark": [150, 126, 92],
+        "light": [245, 238, 224],
+        "lines": 420,
+        "seed": 7
+      },
       "repeatInches": [14, 28],
       "roughness": 0.62
+    },
+    "custom-rift": {
+      "label": "Custom rift cut wood (choose color)",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood-rift",
+      "params": {
+        "base": "#dccdb2",
+        "dark": [150, 126, 92],
+        "light": [245, 238, 224],
+        "lines": 420,
+        "seed": 7
+      },
+      "repeatInches": [14, 28],
+      "roughness": 0.62,
+      "custom": {
+        "color": "#dccdb2",
+        "gloss": 0.35
+      }
+    },
+    "custom-plain": {
+      "label": "Custom plain sawn wood, cathedral grain (choose color)",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood-plain",
+      "params": {
+        "base": "#c9a77c",
+        "boards": 2,
+        "seed": 5
+      },
+      "repeatInches": [14, 40],
+      "roughness": 0.6,
+      "custom": {
+        "color": "#c9a77c",
+        "gloss": 0.35
+      }
+    },
+    "custom-metal": {
+      "label": "Custom metal (choose color and gloss)",
+      "category": "metal",
+      "kind": "metal",
+      "color": "#b9b6ae",
+      "roughness": 0.32,
+      "custom": {
+        "color": "#b9b6ae",
+        "gloss": 0.7
+      }
     },
     "walnut-natural": {
       "label": "Walnut, natural (clear finish)",
       "category": "wood",
       "kind": "procedural",
-      "generator": "wood",
-      "params": { "base": "#5e4030", "dark": [38, 24, 16], "light": [140, 104, 74], "lines": 380, "seed": 21 },
+      "generator": "wood-rift",
+      "params": {
+        "base": "#5e4030",
+        "dark": [38, 24, 16],
+        "light": [140, 104, 74],
+        "lines": 380,
+        "seed": 21
+      },
       "repeatInches": [14, 28],
       "roughness": 0.55
     },
@@ -38,7 +97,11 @@
       "category": "stone",
       "kind": "procedural",
       "generator": "stone",
-      "params": { "base": "#ece6da", "veins": 14, "seed": 11 },
+      "params": {
+        "base": "#ece6da",
+        "veins": 14,
+        "seed": 11
+      },
       "repeatInches": [60, 60],
       "roughness": 0.55
     },
@@ -47,7 +110,12 @@
       "category": "tile",
       "kind": "procedural",
       "generator": "tile-grid",
-      "params": { "base": "#e8ebe9", "grout": "#8e8f8a", "groutPx": 8, "px": [256, 256] },
+      "params": {
+        "base": "#e8ebe9",
+        "grout": "#8e8f8a",
+        "groutPx": 8,
+        "px": [256, 256]
+      },
       "repeatInches": [4, 4],
       "roughness": 0.28
     },
@@ -56,7 +124,12 @@
       "category": "tile",
       "kind": "procedural",
       "generator": "tile-grid",
-      "params": { "base": "#e3e7e5", "grout": "#9fa09b", "groutPx": 4, "px": [512, 64] },
+      "params": {
+        "base": "#e3e7e5",
+        "grout": "#9fa09b",
+        "groutPx": 4,
+        "px": [512, 64]
+      },
       "repeatInches": [8, 1],
       "roughness": 0.3
     },
@@ -65,7 +138,15 @@
       "category": "tile",
       "kind": "procedural",
       "generator": "plank-offset",
-      "params": { "grout": "#6f5d4c", "colors": ["#a38a6f", "#94795e", "#b09679"], "seed": 3 },
+      "params": {
+        "grout": "#6f5d4c",
+        "colors": [
+          "#a38a6f",
+          "#94795e",
+          "#b09679"
+        ],
+        "seed": 3
+      },
       "repeatInches": [48, 16],
       "roughness": 0.6
     },
@@ -130,6 +211,130 @@
       "kind": "color",
       "color": "#f2f1ec",
       "roughness": 0.4
+    },
+    "soapstone-honed": {
+      "label": "Soapstone, honed (Monterey) - colour approximate",
+      "category": "stone",
+      "kind": "procedural",
+      "generator": "stone",
+      "params": {
+        "base": "#3b3f3e",
+        "mottle": [62, 66, 66],
+        "mottleSpread": 10,
+        "vein": [128, 134, 132],
+        "veinAlpha": [0.12, 0.32],
+        "veins": 18,
+        "seed": 31
+      },
+      "repeatInches": [60, 60],
+      "roughness": 0.72
+    },
+    "fantastico-onyx-polished": {
+      "label": "Fantastico Onyx, polished - colour approximate",
+      "category": "stone",
+      "kind": "procedural",
+      "generator": "stone",
+      "params": {
+        "base": "#efe8db",
+        "mottle": [230, 220, 204],
+        "mottleSpread": 14,
+        "vein": [178, 160, 136],
+        "veinAlpha": [0.08, 0.28],
+        "veins": 40,
+        "veinWidth": 2.6,
+        "blur": 2.2,
+        "seed": 17
+      },
+      "repeatInches": [48, 48],
+      "roughness": 0.08
+    },
+    "walnut-plain-coffee": {
+      "label": "Walnut, plain sawn, warm coffee stain, vertical grain",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood-plain",
+      "params": {
+        "base": "#4e3322",
+        "dark": [45, 30, 20],
+        "light": [131, 112, 100],
+        "boards": 2,
+        "seed": 9
+      },
+      "repeatInches": [14, 40],
+      "roughness": 0.5
+    },
+    "walnut-rift-coffee": {
+      "label": "Rift walnut, warm coffee stain",
+      "category": "wood",
+      "kind": "procedural",
+      "generator": "wood-rift",
+      "params": {
+        "base": "#553826",
+        "dark": [32, 21, 14],
+        "light": [136, 116, 103],
+        "lines": 380,
+        "seed": 23
+      },
+      "repeatInches": [14, 28],
+      "roughness": 0.5
+    },
+    "parker-olive-2x7": {
+      "label": "Parker Olive tile, 2-3/4 x 7-1/2, horizontal stack - colour approximate",
+      "category": "tile",
+      "kind": "procedural",
+      "generator": "tile-grid",
+      "params": {
+        "base": "#7b7a52",
+        "grout": "#8d8a7c",
+        "groutPx": 8,
+        "px": [512, 188]
+      },
+      "repeatInches": [7.5, 2.75],
+      "roughness": 0.2
+    },
+    "black-steel": {
+      "label": "Black steel (window and door frames)",
+      "category": "metal",
+      "kind": "metal",
+      "color": "#2a2a2a",
+      "roughness": 0.45,
+      "metalness": 0.6
+    },
+    "bronze-steel": {
+      "label": "Bronze steel (window and door frames)",
+      "category": "metal",
+      "kind": "metal",
+      "color": "#4b3a2a",
+      "roughness": 0.4,
+      "metalness": 0.7
+    },
+    "appliance-glass": {
+      "label": "Dark appliance glass (oven windows, wine column)",
+      "category": "detail",
+      "kind": "color",
+      "color": "#141518",
+      "roughness": 0.08
+    },
+    "cast-iron": {
+      "label": "Cast iron grates",
+      "category": "metal",
+      "kind": "color",
+      "color": "#1d1d1d",
+      "roughness": 0.7
+    },
+    "ceiling-paint": {
+      "label": "Painted ceiling (neutral, not specified)",
+      "category": "wall",
+      "kind": "color",
+      "color": "#e9e7e2",
+      "roughness": 0.95
+    },
+    "sink-drain": {
+      "label": "Sink drain (black)",
+      "category": "detail",
+      "kind": "color",
+      "color": "#111111",
+      "roughness": 0.45
     }
   }
 }
